@@ -31,6 +31,7 @@
 
   <script defer src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
   <script defer src="js/config.js"></script>
+  <script defer src="js/exif.js"></script>
   <script defer src="js/app.js"></script>
 </head>
 <body>
@@ -167,6 +168,24 @@
         <textarea id="field-notes" name="notes" rows="3" maxlength="1200" placeholder="Timings, festivals, history, official donation details…"></textarea>
       </div>
 
+      <div class="field photo-field">
+        <label for="field-photo">Temple photo <span class="opt">(optional)</span></label>
+        <input id="field-photo" name="photo" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+        <div class="photo-uploader">
+          <button type="button" class="btn btn-secondary" id="choose-photo">
+            <span aria-hidden="true">📷</span> Add a geotagged photo
+          </button>
+          <p class="hint" id="photo-hint">
+            A photo taken at the temple can place the pin for you. Its GPS is read on your device,
+            and location metadata is removed from the published image.
+          </p>
+        </div>
+        <div class="photo-preview" id="photo-preview" hidden>
+          <img id="photo-preview-img" alt="Temple photo preview">
+          <button type="button" class="photo-remove" id="remove-photo">Remove photo</button>
+        </div>
+      </div>
+
       <input type="hidden" id="field-lat" name="lat">
       <input type="hidden" id="field-lng" name="lng">
       <p class="coords-note" id="coords-note"></p>
@@ -174,6 +193,14 @@
         <span aria-hidden="true">⌖</span> Pick the exact spot on the map
       </button>
       <p class="form-note" id="contribution-note"></p>
+
+      <div class="form-warning" id="duplicate-warning" role="alert" tabindex="-1" hidden>
+        <p id="duplicate-text"></p>
+        <div class="form-warning-actions">
+          <button type="button" class="btn btn-secondary" id="confirm-duplicate">Yes, save it anyway</button>
+          <button type="button" class="btn btn-ghost-dark" id="dismiss-duplicate">Let me check</button>
+        </div>
+      </div>
 
       <div class="dialog-actions">
         <button class="btn btn-ghost-dark" type="button" data-close-dialog>Cancel</button>

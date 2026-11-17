@@ -3,12 +3,13 @@
  * Map tiles, Overpass responses and other cross-origin requests are never cached.
  */
 
-const VERSION = "mandir-marg-v1.3.0";
+const VERSION = "mandir-marg-v1.4.0";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./css/styles.css",
   "./js/config.js",
+  "./js/exif.js",
   "./js/app.js",
   "./manifest.webmanifest",
   "./icons/icon.svg",
@@ -72,6 +73,10 @@ self.addEventListener("fetch", (event) => {
 
   // Let the temple proxy handle its own (edge) caching.
   if (url.pathname.includes("/api/")) return;
+
+  // Published community data changes when a moderator approves a temple. Always
+  // ask the network so a new approval appears immediately.
+  if (url.pathname.includes("/data/")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request));

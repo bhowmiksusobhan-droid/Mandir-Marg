@@ -9,6 +9,10 @@ framework, no server of your own to maintain. Everything runs on free tiers.
 - **Live map** of Hindu temples from OpenStreetMap, clustered and searchable
 - **Street or satellite view** — switch to Esri imagery to spot a temple roof, then tap the map to place its pin exactly
 - **Find temples near me** using the browser's location, or search any city or town
+- **Photo contributions** — a geotagged photo places the pin automatically, and EXIF is stripped before publishing
+- **Approval becomes publication** — moderator-approved temples appear on the map from a small community file
+- **Duplicate warning** — if a temple is already mapped within 80 m, the form asks before saving a second pin
+- **Share a temple** — a link opens the map on that temple, ready to send on WhatsApp
 - **Suggest a temple or an edit** from a phone-friendly form
 - **Installable PWA** — add it to your home screen; the app shell works offline
 - **Donations stay official** — v1 only shows a temple's own website/phone; it never handles money
@@ -134,6 +138,40 @@ dashboard, then add good ones to the map (see the roadmap for a planned admin sc
 Suggested review rule: approve only information you can verify from an official temple source, and
 remove personal phone numbers submitted without consent.
 
+### From approval to the map
+
+Approving a row in the dashboard is not enough on its own: the public map reads a small static file
+so it does not need a database connection for every visitor. Publish the approved rows with:
+
+```bash
+# Windows PowerShell
+$env:SUPABASE_URL = "https://abcdefgh.supabase.co"
+$env:SUPABASE_SERVICE_ROLE_KEY = "service-role-key"
+
+python tools/publish_temples.py
+
+git add public/data/community-temples.json public/data/photos
+git commit -m "Publish approved temples"
+git push
+```
+
+On macOS or Linux use `export` instead of `$env:`. The tool:
+
+1. Reads every row with `status = approved` (paging past Supabase's 1,000-row limit).
+2. Writes photos that arrived as data URLs into `public/data/photos/` and points the JSON at them.
+3. Removes entries that are no longer approved, so rejecting a row also removes it from the map.
+4. Keeps hand-curated records whose IDs do not start with `community/`.
+5. Skips near-identical approvals within 75 m with a matching name, and prints what it skipped.
+
+Preview without changing anything with `python tools/publish_temples.py --dry-run`. To work offline,
+export the rows to JSON and use `--input rows.json`. The service role key must stay secret; the anon
+key also works because approved rows are readable by policy, but it is safer to run the tool locally.
+
+**Photo privacy.** The browser downscales a chosen photo to at most 1,280 px and re-encodes it as
+JPEG through a canvas. That strips EXIF (GPS, camera model, timestamps) from the file that is stored
+or uploaded. GPS is used only on the visitor's device, to move the pin. A manual satellite pin is
+never silently replaced: if the photo was taken more than 500 m away, the picked pin is kept.
+
 ---
 
 ## 4. Where the temple data comes from
@@ -146,11 +184,20 @@ Request flow:
 browser ──▶ /api/temples (Cloudflare Worker, cached 30 min at the edge)
               └─▶ Overpass mirror 1 … 4 (server-side failover)
 browser ──▶ Overpass directly (only when the proxy is not deployed)
+
+browser ──▶ data/community-temples.json (approved contributions, static file)
 ```
 
 The browser also caches each searched area for **6 hours** in `localStorage`, so revisiting a city
 is instant and does not touch the network. The proxy rounds coordinates to two decimals, which
 means everyone in the same district shares one upstream request.
+
+Community temples are merged with the OpenStreetMap results in the browser. Only entries inside the
+current radius are added, so the community file can grow across India without slowing a local view.
+When a community entry sits within **60 m** of an OSM temple with a matching name, the community
+record wins: it may have a photo and verified notes. The OSM identifiers are kept, so the popup can
+still link back to the original object. The service worker deliberately does not cache `/data/`, so
+a newly published approval appears on the next visit.
 
 Only elements named in OSM are listed. Each card shows the local name, distance, deity or tradition
 when tagged, and links to directions, the OSM object and the temple's own website.
@@ -208,7 +255,10 @@ mandir-marg/
 │  ├─ index.html              Page structure, search, map, list, contribution dialog
 │  ├─ css/styles.css          All styling (cream/maroon/gold, responsive, reduced motion)
 │  ├─ js/config.js            Supabase URL + anon key (empty by default)
-│  ├─ js/app.js               Map, Overpass/proxy loading, search, geolocation, form, PWA
+│  ├─ js/app.js               Map, temple merge, search, geolocation, form, photos, PWA
+│  ├─ js/exif.js              Tiny EXIF GPS reader (no dependency, no upload)
+│  ├─ data/community-temples.json  Approved community temples (published by the tool)
+│  ├─ data/photos/            Photos published from approved contributions
 │  ├─ manifest.webmanifest    Installable app metadata
 │  ├─ sw.js                   Service worker: app shell offline, 6-hour data cache
 │  ├─ icons/                  SVG + PNG app icons and social preview image
@@ -219,6 +269,7 @@ mandir-marg/
 ├─ supabase/schema.sql        `temple_suggestions` table with insert-only RLS
 ├─ docs/                      README screenshots (not deployed)
 ├─ tools/dev_server.py        Local server + proxy emulator (no dependencies)
+├─ tools/publish_temples.py   Approved Supabase rows → community JSON + photos
 ├─ tools/make-icons.py        Regenerates the PNG icons with Pillow
 └─ start.bat                  One-click local preview on Windows
 ```
@@ -230,12 +281,20 @@ mandir-marg/
 2. `worker.js` validates `lat`, `lng` and `radius`, checks Cloudflare's edge cache, otherwise
    tries four Overpass mirrors in order and caches the result for 30 minutes. Any other URL is
    handed to the `ASSETS` binding and served as a static file.
-3. `app.js` turns OSM elements into temple records, sorts by distance, draws clustered pins and
-   fills the list. Search filters locally first; if nothing matches, Photon geocodes the place and
-   the map moves there.
+3. `app.js` turns OSM elements and approved community records into temple records, merges the two
+   sources, sorts by distance, draws clustered pins and fills the list. Community pins and cards
+   are marked. Search filters locally first; if nothing matches, Photon geocodes the place and the
+   map moves there.
 4. "Pick the exact spot" closes the form, switches to satellite imagery, zooms to rooftop scale and
    takes the tapped coordinate, then reopens the form with the pin placed.
-5. Suggestions go to Supabase when configured, and always stay in `localStorage` as a local copy.
+5. Choosing a photo reads its EXIF GPS in the browser, downscales it through a canvas (which
+   removes EXIF) and, when there is no manual pin, uses the photo's location for the temple.
+6. Before saving, the app looks for another temple within 80 m. It explains the match and asks the
+   contributor to confirm or to switch to "Suggest an edit" instead.
+7. Suggestions go to Supabase when configured, and always stay in `localStorage` as a local copy.
+   Approved rows are published to `public/data/community-temples.json`, which is what visitors read.
+8. Selecting a temple writes `?temple=<id>` into the address bar. That link reopens the same temple,
+   even when it is a community entry outside the visitor's saved area.
 
 ### Changing the amount of data
 
@@ -252,11 +311,17 @@ There is no build step, so there is nothing to compile. Before publishing a chan
 1. Run `python tools/dev_server.py`.
 2. Search a city, click a pin, add a temple, and reload to confirm the local suggestion persists.
 3. Switch to **Satellite**, then Add a temple → **Pick the exact spot on the map** and tap a roof.
-4. Check the browser console for errors.
-5. Use `python tools/make-icons.py` after editing `public/icons/icon.svg` (needs `pip install pillow`).
+4. Add a geotagged photo and check that the pin moves to the photo's location; then try a photo with
+   GPS more than 500 m from a manually picked pin and confirm the manual pin is kept.
+5. Try adding a temple within 80 m of an existing pin and confirm the duplicate warning appears.
+6. Click a pin, use **Share**, and open the copied `?temple=` link in a new tab.
+7. Preview the publish step: `python tools/publish_temples.py --input rows.json --dry-run`.
+8. Check the browser console for errors.
+9. Use `python tools/make-icons.py` after editing `public/icons/icon.svg` (needs `pip install pillow`).
 
 Cache busting: bump `VERSION` in `public/sw.js` whenever you change the app shell, so installed
-copies update. The service worker never caches `/api/` responses, which keeps temple data fresh.
+copies update. The service worker never caches `/api/` or `/data/` responses, which keeps temple data
+and newly approved community entries fresh.
 
 ---
 
@@ -264,14 +329,14 @@ copies update. The service worker never caches `/api/` responses, which keeps te
 
 **Next**
 
-- Moderation screen for `temple_suggestions` (approve → promote into the map)
-- Import approved temples into a `temples` table, merged with OSM at query time
+- Moderation screen for `temple_suggestions` (approve without leaving the site)
+- Temple detail pages with timings, festivals, history and more photos (with permission)
 - Hindi interface and temple names in Devanagari throughout
-- Temple detail pages with timings, festivals, history and photos (with permission)
+- A photo gallery per temple, with attribution to the contributor
 
 **Later**
 
-- Android app with MapLibre Native, reusing the same Supabase tables and `/api/temples`
+- Android app with MapLibre Native, reusing the same community JSON and `/api/temples`
 - Offline packs for major pilgrimage cities
 - Verified temple accounts for official timings and donation details
 - Accessibility and performance audits on low-end phones and slow networks
