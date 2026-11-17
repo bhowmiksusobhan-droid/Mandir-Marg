@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+# Mandir Marg — a free, community-maintained map of Hindu temples.

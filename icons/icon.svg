@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Mandir Marg temple emblem">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a2525"/>
+      <stop offset="1" stop-color="#4f1414"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="196" fill="none" stroke="#d9a441" stroke-width="5"/>
+  <circle cx="256" cy="256" r="228" fill="none" stroke="#802b2b" stroke-width="2"/>
+
+  <!-- diyas -->
+  <circle cx="144" cy="385" r="11" fill="#d9a441"/>
+  <ellipse cx="144" cy="368" rx="5" ry="8" fill="#f0c979"/>
+  <circle cx="368" cy="385" r="11" fill="#d9a441"/>
+  <ellipse cx="368" cy="368" rx="5" ry="8" fill="#f0c979"/>
+
+  <!-- temple -->
+  <rect x="156" y="393" width="200" height="13" rx="4" fill="#e8d3a8"/>
+  <rect x="167" y="350" width="178" height="46" rx="6" fill="#f8ead0"/>
+  <rect x="187" y="317" width="138" height="33" rx="3" fill="#f8ead0"/>
+  <path d="M219 319 H293 L286 287 H226 Z" fill="#f8ead0"/>
+  <path d="M236 287 H276 L270 255 H242 Z" fill="#f8ead0"/>
+  <path d="M242 255 H270 L256 178 Z" fill="#f8ead0"/>
+
+  <!-- finial and flag -->
+  <rect x="252" y="134" width="8" height="47" fill="#d9a441"/>
+  <circle cx="256" cy="126" r="10" fill="#d9a441"/>
+  <path d="M260 139 L318 153 L260 168 Z" fill="#d9a441"/>
+
+  <!-- doorway -->
+  <ellipse cx="256" cy="372" rx="19" ry="19" fill="#671c1c"/>
+  <rect x="240" y="372" width="32" height="24" fill="#671c1c"/>
+  <path d="M237 372 a19 19 0 0 1 38 0" fill="none" stroke="#d9a441" stroke-width="3"/>
+  <line x1="240" y1="372" x2="240" y2="396" stroke="#d9a441" stroke-width="3"/>
+  <line x1="272" y1="372" x2="272" y2="396" stroke="#d9a441" stroke-width="3"/>
+</svg>

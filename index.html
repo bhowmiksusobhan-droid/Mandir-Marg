@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en-IN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#6b1d1d">
+
+  <title>Mandir Marg — Way to the Temple</title>
+  <meta name="description" content="Mandir Marg (मंदिर मार्ग) is a free, community-maintained map of Hindu temples. Discover temples near you, learn about them, and help keep their information alive.">
+  <meta name="keywords" content="Hindu temples, temple map, mandir, temple near me, pilgrimage, India temples">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Mandir Marg — Way to the Temple">
+  <meta property="og:description" content="A free, community-maintained map of Hindu temples. Find temples near you and help keep their information alive.">
+  <meta property="og:image" content="icons/og-image.png">
+  <meta property="og:locale" content="en_IN">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="manifest" href="manifest.webmanifest">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="css/styles.css">
+
+  <script defer src="https://unpkg.com/maplibre-gl@5.9.0/dist/maplibre-gl.js"></script>
+  <script defer src="js/config.js"></script>
+  <script defer src="js/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#temple-list">Skip to temple results</a>
+
+  <header class="site-header">
+    <a class="brand" href="./" aria-label="Mandir Marg home">
+      <img class="brand-mark" src="icons/icon.svg" alt="" width="46" height="46">
+      <span class="brand-text">
+        <h1>Mandir Marg</h1>
+        <p class="tagline"><span lang="hi">मंदिर मार्ग</span> · the way to the temple</p>
+      </span>
+    </a>
+    <div class="header-actions">
+      <button id="install-app" class="btn btn-ghost" type="button" hidden>Install app</button>
+      <button class="btn btn-primary" type="button" data-open-add>+ Add a temple</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="search-panel" aria-labelledby="search-heading">
+      <h2 id="search-heading" class="visually-hidden">Find temples</h2>
+
+      <form id="search-form" class="search-row" role="search">
+        <label class="visually-hidden" for="search-input">Search by temple name, city or town</label>
+        <input id="search-input" name="q" type="search" placeholder="Temple, city or town…" autocomplete="off" enterkeyhint="search">
+        <button class="btn btn-primary" type="submit">Find</button>
+      </form>
+
+      <div class="controls">
+        <button id="near-me" class="btn btn-secondary" type="button">
+          <span aria-hidden="true">◎</span> Temples near me
+        </button>
+        <label class="radius-label" for="radius">Within</label>
+        <select id="radius" name="radius">
+          <option value="5000">5 km</option>
+          <option value="10000">10 km</option>
+          <option value="25000" selected>25 km</option>
+          <option value="50000">50 km</option>
+        </select>
+      </div>
+
+      <p id="status" class="status" role="status" aria-live="polite" aria-atomic="true">Finding temples…</p>
+    </section>
+
+    <section class="map-panel" aria-label="Map of Hindu temples">
+      <div id="map"></div>
+      <div class="basemap-toggle" role="group" aria-label="Map type">
+        <button type="button" data-basemap="streets" aria-pressed="true">Map</button>
+        <button type="button" data-basemap="satellite" aria-pressed="false">Satellite</button>
+      </div>
+      <p id="map-hint" class="map-hint">Tap a temple pin for details · drag to explore</p>
+      <div id="map-notice" class="map-notice" role="status" aria-live="polite" hidden>
+        <span>Tap the temple on the satellite map to place its pin.</span>
+        <button class="btn btn-ghost" type="button" id="cancel-pick">Cancel</button>
+      </div>
+      <noscript>
+        <p class="noscript-note">The interactive map needs JavaScript. Please enable it, or use the temple list.</p>
+      </noscript>
+    </section>
+
+    <section class="list-panel" aria-labelledby="list-title">
+      <h2 id="list-title" class="visually-hidden">Temple results</h2>
+      <ol id="temple-list" class="temple-list"></ol>
+
+      <div id="empty-state" class="empty" hidden>
+        <span class="empty-icon" aria-hidden="true">🛕</span>
+        <h3>No temples found here yet</h3>
+        <p>Try a larger radius, search for a city, or add a temple you know.</p>
+        <button class="btn btn-primary" type="button" data-open-add>Add a temple</button>
+      </div>
+
+      <div class="contribute-card">
+        <p><strong>Is a temple missing?</strong> Help other devotees find it by adding its details to the map.</p>
+        <button class="btn btn-secondary" type="button" data-open-add>Add a temple</button>
+      </div>
+
+      <details id="my-contributions" class="contributions" hidden>
+        <summary>Your contributions (<span id="contribution-count">0</span>)</summary>
+        <ul id="contribution-list" class="contribution-list"></ul>
+        <p class="hint" id="contributions-hint">Saved on this device.</p>
+      </details>
+
+      <footer class="attribution">
+        <p>
+          Temple data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap contributors</a> (ODbL).
+          Map tiles by <a href="https://openfreemap.org/" target="_blank" rel="noopener noreferrer">OpenFreeMap</a>.
+          Satellite imagery © <a href="https://www.esri.com/" target="_blank" rel="noopener noreferrer">Esri</a>, Maxar, Earthstar Geographics.
+        </p>
+        <p class="seva">Built with seva · Free for everyone</p>
+      </footer>
+    </section>
+  </main>
+
+  <dialog id="temple-dialog" closedby="any" aria-labelledby="temple-dialog-title">
+    <form id="temple-form" class="dialog-form">
+      <div class="dialog-head">
+        <div>
+          <p class="eyebrow">Community contribution</p>
+          <h2 id="temple-dialog-title">Add a temple</h2>
+        </div>
+        <button class="icon-button" type="button" data-close-dialog aria-label="Close dialog">✕</button>
+      </div>
+
+      <p id="dialog-intro" class="dialog-intro">Share what you know so other devotees can find this temple.</p>
+
+      <input type="hidden" id="field-kind" name="kind" value="add">
+      <input type="hidden" id="field-osm" name="osmId" value="">
+
+      <div class="field">
+        <label for="field-name">Temple name <span class="req" aria-hidden="true">*</span></label>
+        <input id="field-name" name="name" type="text" required minlength="2" maxlength="120" autocomplete="off" data-error="name-error" autofocus>
+        <p class="error-msg" id="name-error"><span role="img" aria-label="Error">⚠</span> Please enter the temple's name.</p>
+      </div>
+
+      <div class="field-row">
+        <div class="field">
+          <label for="field-deity">Main deity <span class="opt">(optional)</span></label>
+          <input id="field-deity" name="deity" type="text" maxlength="80" autocomplete="off" placeholder="e.g. Shiva, Vishnu, Durga">
+        </div>
+        <div class="field">
+          <label for="field-city">City / area <span class="opt">(optional)</span></label>
+          <input id="field-city" name="city" type="text" maxlength="100" autocomplete="off" placeholder="e.g. Varanasi">
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="field-address">Address <span class="opt">(optional)</span></label>
+        <input id="field-address" name="address" type="text" maxlength="200" autocomplete="street-address" placeholder="Street, locality, landmark">
+      </div>
+
+      <div class="field">
+        <label for="field-notes">What should we know? <span class="opt">(optional)</span></label>
+        <textarea id="field-notes" name="notes" rows="3" maxlength="1200" placeholder="Timings, festivals, history, official donation details…"></textarea>
+      </div>
+
+      <input type="hidden" id="field-lat" name="lat">
+      <input type="hidden" id="field-lng" name="lng">
+      <p class="coords-note" id="coords-note"></p>
+      <button type="button" class="btn btn-secondary pick-button" id="pick-location">
+        <span aria-hidden="true">⌖</span> Pick the exact spot on the map
+      </button>
+      <p class="form-note" id="contribution-note"></p>
+
+      <div class="dialog-actions">
+        <button class="btn btn-ghost-dark" type="button" data-close-dialog>Cancel</button>
+        <button class="btn btn-primary" type="submit">Save suggestion</button>
+      </div>
+
+      <p class="form-note">Please contribute only information you know to be accurate. Suggestions are reviewed before appearing publicly.</p>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>
