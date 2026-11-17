@@ -45,16 +45,18 @@ what visitors will see.
 
 ---
 
-## 2. Put it online for free (Cloudflare Pages)
+## 2. Put it online for free (Cloudflare Workers)
 
-Cloudflare Pages gives you a free `https://your-name.pages.dev` address, free HTTPS, and free
-serverless functions — which this project uses for its cached temple proxy.
+Cloudflare Workers gives you a free `https://your-project.your-name.workers.dev` address, free
+HTTPS, and free static hosting plus a small amount of server code — which this project uses for its
+cached temple proxy. No credit card is needed.
 
-**Why Git instead of drag-and-drop?** Cloudflare's drag-and-drop upload does not include the
-`functions/` folder. Connecting a Git repository does.
+The repository already contains [`wrangler.jsonc`](wrangler.jsonc), so Cloudflare needs no build
+settings: it runs `npx wrangler deploy`, serves everything in `public/` as static assets, and runs
+`src/worker.js` only for `/api/*`.
 
 1. Create a free GitHub account and a new **empty** repository, for example `mandir-marg`.
-2. Upload or push this `mandir-marg` folder to it. With Git:
+2. Push this `mandir-marg` folder to it:
 
    ```bash
    cd mandir-marg
@@ -66,33 +68,39 @@ serverless functions — which this project uses for its cached temple proxy.
    git push -u origin main
    ```
 
-3. Go to <https://dash.cloudflare.com/> → **Workers & Pages** → **Create** → **Pages** →
-   **Connect to Git** and pick the repository.
-4. Build settings:
-   - **Framework preset:** None
-   - **Build command:** leave empty
-   - **Build output directory:** `/` (the repository root)
-5. Click **Save and Deploy**. In a minute your site is live at
-   `https://your-project.pages.dev`.
+3. Go to <https://dash.cloudflare.com/> → **Workers & Pages** → **Create** →
+   **Connect to Git** (under *Import a repository*) and pick the repository.
+4. Keep the detected settings — **Build command:** empty, **Deploy command:**
+   `npx wrangler deploy`. The project name comes from `wrangler.jsonc`.
+5. Click **Deploy**. In a minute your site is live at
+   `https://mandir-marg.your-name.workers.dev`.
+
+Every later `git push` to `main` redeploys automatically.
+
+> If you created the project as **Pages** by mistake, delete it and reconnect through the Workers
+> flow above. This repository is structured for Workers static assets, not Pages Functions.
 
 ### Custom domain (optional)
 
-Pages → your project → **Custom domains**. You can keep the free `*.pages.dev` address forever, or
-attach a domain you already own (about ₹500–1,200/year). Nothing else needs to change.
+Workers → your project → **Settings → Domains & Routes** → **Add custom domain**. You can keep the
+free `*.workers.dev` address forever, or attach a domain you already own (about ₹500–1,200/year).
+Nothing else needs to change.
 
 ### What the free tier includes
 
 - Unlimited static requests and unlimited bandwidth for this kind of site
-- 100,000 Function requests per day (the proxy usually serves from cache, so this is plenty)
+- 100,000 Worker requests per day (the proxy usually serves from cache, so this is plenty)
 - Automatic HTTPS, HTTP/3 and a global CDN
-- Rollbacks and preview deployments on every Git push
+- Preview deployments and rollbacks on every Git push
 
 ### Other free hosts
 
-GitHub Pages, Netlify and Vercel all host the static site for free. On those hosts the
-`functions/api/temples.js` endpoint is not deployed, so the browser calls Overpass directly and
-relies on its local 6-hour cache. That works, but public Overpass servers are rate-limited. For a
-reliable public site, Cloudflare Pages is recommended.
+GitHub Pages, Netlify and Vercel can host the static files for free, but they will not run
+`src/worker.js`, so the `/api/temples` proxy is not available. The browser then calls Overpass
+directly and relies on its local 6-hour cache. That works, but public Overpass servers are
+rate-limited. For a reliable public site, Cloudflare Workers is recommended.
+
+To host only the static part elsewhere, upload the contents of `public/` (not the repository root).
 
 ---
 
@@ -107,7 +115,7 @@ flow. To collect them centrally:
 3. Open **Project Settings → API** and copy:
    - **Project URL**
    - **anon public** key
-4. Put both into [`js/config.js`](js/config.js):
+4. Put both into [`public/js/config.js`](public/js/config.js):
 
    ```js
    window.MANDIR_MARG_CONFIG = {
@@ -135,7 +143,7 @@ Temple locations come from **OpenStreetMap**, queried through the [Overpass API]
 Request flow:
 
 ```
-browser ──▶ /api/temples (Cloudflare Function, cached 30 min at the edge)
+browser ──▶ /api/temples (Cloudflare Worker, cached 30 min at the edge)
               └─▶ Overpass mirror 1 … 4 (server-side failover)
 browser ──▶ Overpass directly (only when the proxy is not deployed)
 ```
@@ -196,18 +204,22 @@ Never sell contributor data or visitor location data. There is no advertising or
 
 ```
 mandir-marg/
-├─ index.html                 Page structure, search, map, list, contribution dialog
-├─ css/styles.css             All styling (cream/maroon/gold, responsive, reduced motion)
-├─ js/config.js               Supabase URL + anon key (empty by default)
-├─ js/app.js                  Map, Overpass/proxy loading, search, geolocation, form, PWA
-├─ manifest.webmanifest       Installable app metadata
-├─ sw.js                      Service worker: app shell offline, 6-hour data cache
-├─ icons/                     SVG + PNG app icons and social preview image
-├─ functions/api/temples.js   Cloudflare Pages Function: cached, validated Overpass proxy
+├─ public/                    Everything the browser can download
+│  ├─ index.html              Page structure, search, map, list, contribution dialog
+│  ├─ css/styles.css          All styling (cream/maroon/gold, responsive, reduced motion)
+│  ├─ js/config.js            Supabase URL + anon key (empty by default)
+│  ├─ js/app.js               Map, Overpass/proxy loading, search, geolocation, form, PWA
+│  ├─ manifest.webmanifest    Installable app metadata
+│  ├─ sw.js                   Service worker: app shell offline, 6-hour data cache
+│  ├─ icons/                  SVG + PNG app icons and social preview image
+│  ├─ robots.txt              Crawler rules
+│  └─ _headers                Security headers, applied to static assets by Cloudflare
+├─ src/worker.js              Worker: /api/temples proxy, everything else to ASSETS
+├─ wrangler.jsonc             Worker config: assets directory, binding, /api/* routing
 ├─ supabase/schema.sql        `temple_suggestions` table with insert-only RLS
+├─ docs/                      README screenshots (not deployed)
 ├─ tools/dev_server.py        Local server + proxy emulator (no dependencies)
 ├─ tools/make-icons.py        Regenerates the PNG icons with Pillow
-├─ _headers                   Security headers for Cloudflare Pages
 └─ start.bat                  One-click local preview on Windows
 ```
 
@@ -215,8 +227,9 @@ mandir-marg/
 
 1. `app.js` reads the saved view (or defaults to Varanasi), shows the map, and asks
    `/api/temples` for temples.
-2. The Function validates `lat`, `lng` and `radius`, checks Cloudflare's edge cache, otherwise
-   tries four Overpass mirrors in order and caches the result for 30 minutes.
+2. `worker.js` validates `lat`, `lng` and `radius`, checks Cloudflare's edge cache, otherwise
+   tries four Overpass mirrors in order and caches the result for 30 minutes. Any other URL is
+   handed to the `ASSETS` binding and served as a static file.
 3. `app.js` turns OSM elements into temple records, sorts by distance, draws clustered pins and
    fills the list. Search filters locally first; if nothing matches, Photon geocodes the place and
    the map moves there.
@@ -226,9 +239,9 @@ mandir-marg/
 
 ### Changing the amount of data
 
-- Radius options: `#radius` in `index.html` and `ALLOWED_RADII` in `functions/api/temples.js`.
-- Result cap: `out center 300;` in `js/app.js` and `functions/api/temples.js` (keep both in sync).
-- Default view: `DEFAULT_VIEW` in `js/app.js`.
+- Radius options: `#radius` in `public/index.html` and `ALLOWED_RADII` in `src/worker.js`.
+- Result cap: `out center 300;` in `public/js/app.js` and `src/worker.js` (keep both in sync).
+- Default view: `DEFAULT_VIEW` in `public/js/app.js`.
 
 ---
 
@@ -240,10 +253,10 @@ There is no build step, so there is nothing to compile. Before publishing a chan
 2. Search a city, click a pin, add a temple, and reload to confirm the local suggestion persists.
 3. Switch to **Satellite**, then Add a temple → **Pick the exact spot on the map** and tap a roof.
 4. Check the browser console for errors.
-5. Use `python tools/make-icons.py` after editing `icons/icon.svg` (needs `pip install pillow`).
+5. Use `python tools/make-icons.py` after editing `public/icons/icon.svg` (needs `pip install pillow`).
 
-Cache busting: bump `VERSION` in `sw.js` whenever you change the app shell, so installed copies
-update. The service worker never caches `/api/` responses, which keeps temple data fresh.
+Cache busting: bump `VERSION` in `public/sw.js` whenever you change the app shell, so installed
+copies update. The service worker never caches `/api/` responses, which keeps temple data fresh.
 
 ---
 

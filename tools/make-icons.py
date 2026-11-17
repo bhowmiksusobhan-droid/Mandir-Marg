@@ -9,8 +9,8 @@ from pathlib import Path
 from PIL import Image, ImageDraw
 
 ROOT = Path(__file__).resolve().parent.parent
-ICONS = ROOT / "icons"
-ICONS.mkdir(exist_ok=True)
+ICONS = ROOT / "public" / "icons"
+ICONS.mkdir(parents=True, exist_ok=True)
 
 SIZE = 1024
 MAROON_TOP = (122, 37, 37)

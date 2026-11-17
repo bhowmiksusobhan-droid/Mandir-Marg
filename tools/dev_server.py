@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Local preview server for Mandir Marg.
 
-Serves the static site and emulates the Cloudflare Pages Function at
-/api/temples, including a small in-memory cache. No dependencies required.
+Serves the static site from public/ and emulates the Cloudflare Worker route
+at /api/temples, including a small in-memory cache. No dependencies required.
 
 Usage:
     python tools/dev_server.py
@@ -23,6 +23,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+PUBLIC = ROOT / "public"
 PORT = int(os.environ.get("PORT", "5173"))
 
 MIRRORS = [
@@ -74,7 +75,7 @@ def fetch_elements(query: str) -> list | None:
 
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=str(ROOT), **kwargs)
+        super().__init__(*args, directory=str(PUBLIC), **kwargs)
 
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
         parsed = urllib.parse.urlparse(self.path)

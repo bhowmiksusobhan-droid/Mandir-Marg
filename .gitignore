@@ -1,0 +1,15 @@
+# Local tooling output
+.wrangler/
+node_modules/
+__pycache__/
+
+# Editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local secrets (never commit real keys)
+.dev.vars
+.env
+.env.*

@@ -1,14 +1,18 @@
 /**
- * Cloudflare Pages Function — GET /api/temples?lat=..&lng=..&radius=..
+ * Mandir Marg Worker — static site + GET /api/temples?lat=..&lng=..&radius=..
  *
- * Why this exists:
+ * Why the proxy exists:
  * Public Overpass servers are rate-limited and sometimes busy, and not every
- * mirror allows browser (CORS) requests. This function fetches on the server,
+ * mirror allows browser (CORS) requests. This Worker fetches on the server,
  * caches each area at Cloudflare's edge for 30 minutes, and serves a small JSON
  * payload. Every visitor in the same area then shares one upstream request.
  *
  * The browser falls back to calling Overpass directly when this endpoint is not
- * available (for example local Python preview or GitHub Pages).
+ * available (for example the local Python preview or GitHub Pages).
+ *
+ * Everything that is not /api/* is served from the static assets in public/ by
+ * the ASSETS binding. `_headers` is applied to those assets by Cloudflare, not
+ * to responses produced here, so this file sets its own headers.
  */
 
 const MIRRORS = [
@@ -28,6 +32,7 @@ function json(body, status = 200, headers = {}) {
       "Content-Type": "application/json; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
       "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
       ...headers
     }
   });
@@ -71,8 +76,7 @@ async function fetchFromMirrors(query) {
   return null;
 }
 
-export async function onRequestGet(context) {
-  const { request } = context;
+async function handleTemples(request, ctx) {
   const url = new URL(request.url);
 
   const lat = Number.parseFloat(url.searchParams.get("lat"));
@@ -89,7 +93,10 @@ export async function onRequestGet(context) {
     !ALLOWED_RADII.has(radius)
   ) {
     return json(
-      { error: "Provide a valid lat (-90..90), lng (-180..180) and radius (5000, 10000, 25000 or 50000)." },
+      {
+        error:
+          "Provide a valid lat (-90..90), lng (-180..180) and radius (5000, 10000, 25000 or 50000)."
+      },
       400,
       { "Cache-Control": "no-store" }
     );
@@ -101,8 +108,7 @@ export async function onRequestGet(context) {
   const cacheKey = new URL(url.origin + "/api/temples");
   cacheKey.search = `?lat=${normalizedLat}&lng=${normalizedLng}&radius=${radius}`;
 
-  const cache =
-    typeof caches !== "undefined" && caches.default ? caches.default : null;
+  const cache = typeof caches !== "undefined" && caches.default ? caches.default : null;
 
   if (cache) {
     const cached = await cache.match(cacheKey.toString());
@@ -118,18 +124,32 @@ export async function onRequestGet(context) {
     );
   }
 
-  const response = json(
-    { elements, fetchedAt: new Date().toISOString() },
-    200,
-    {
-      // Browsers may keep it briefly; the app also caches for 6 hours locally.
-      "Cache-Control": "public, max-age=600, s-maxage=1800, stale-while-revalidate=86400"
-    }
-  );
+  const response = json({ elements, fetchedAt: new Date().toISOString() }, 200, {
+    // Browsers may keep it briefly; the app also caches for 6 hours locally.
+    "Cache-Control": "public, max-age=600, s-maxage=1800, stale-while-revalidate=86400"
+  });
 
-  if (cache && typeof context.waitUntil === "function") {
-    context.waitUntil(cache.put(cacheKey.toString(), response.clone()));
+  if (cache && ctx && typeof ctx.waitUntil === "function") {
+    ctx.waitUntil(cache.put(cacheKey.toString(), response.clone()));
   }
 
   return response;
 }
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    if (url.pathname === "/api/temples" || url.pathname === "/api/temples/") {
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        return json({ error: "Use GET for this endpoint." }, 405, {
+          Allow: "GET, HEAD",
+          "Cache-Control": "no-store"
+        });
+      }
+      return handleTemples(request, ctx);
+    }
+
+    return env.ASSETS.fetch(request);
+  }
+};

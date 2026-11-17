@@ -3,7 +3,7 @@
  * Map tiles, Overpass responses and other cross-origin requests are never cached.
  */
 
-const VERSION = "mandir-marg-v1.2.0";
+const VERSION = "mandir-marg-v1.3.0";
 const APP_SHELL = [
   "./",
   "./index.html",
