@@ -49,7 +49,11 @@ what visitors will see.
 
 ---
 
-## 2. Put it online for free (Cloudflare Workers)
+## 2. Put it online for free
+
+The same repository can deploy two ways. Both are free and include the cached temple proxy.
+
+### Option A — Cloudflare Workers (recommended for a `*.workers.dev` address)
 
 Cloudflare Workers gives you a free `https://your-project.your-name.workers.dev` address, free
 HTTPS, and free static hosting plus a small amount of server code — which this project uses for its
@@ -81,14 +85,37 @@ settings: it runs `npx wrangler deploy`, serves everything in `public/` as stati
 
 Every later `git push` to `main` redeploys automatically.
 
-> If you created the project as **Pages** by mistake, delete it and reconnect through the Workers
-> flow above. This repository is structured for Workers static assets, not Pages Functions.
+### Option B — Cloudflare Pages (gives you `https://mandir-marg.pages.dev`)
+
+Pages uses `<project>.pages.dev`, so the project name is the whole address. This is the only free
+way to get the clean `mandir-marg.<domain>` shape. The repository already includes
+[`functions/api/temples.js`](functions/api/temples.js), a Pages Function that reuses the exact same
+Overpass proxy and edge cache from `src/worker.js`. Static files still come from `public/`, and
+`_headers` works natively on Pages.
+
+1. Push the repository to GitHub (steps 1–2 above).
+2. Go to <https://dash.cloudflare.com/> → **Workers & Pages** → **Create** → **Pages** →
+   **Connect to Git**, and pick the repository.
+3. Set **Framework preset:** None, **Build command:** empty, **Build output directory:** `public`.
+4. Set **Project name:** `mandir-marg` (this becomes the URL), then **Save and Deploy**.
+5. Your site is live at `https://mandir-marg.pages.dev`. Every push to `main` redeploys.
+
+> The project name must be globally available across Cloudflare. If `mandir-marg` is taken, pick
+> another name; the address simply becomes `https://<that-name>.pages.dev`.
+>
+> Direct upload also works without Git:
+> `npx wrangler pages deploy public --project-name mandir-marg`.
+
+Why the URLs differ: a Worker is always `<worker-name>.<account-subdomain>.workers.dev` (for
+example `mandir-marg.your-name.workers.dev`), because the middle label is your account's single
+`workers.dev` subdomain and cannot be removed. Pages has no per-account label, so
+`mandir-marg.pages.dev` is possible.
 
 ### Custom domain (optional)
 
-Workers → your project → **Settings → Domains & Routes** → **Add custom domain**. You can keep the
-free `*.workers.dev` address forever, or attach a domain you already own (about ₹500–1,200/year).
-Nothing else needs to change.
+On Workers: **Settings → Domains & Routes → Add custom domain**. On Pages: **Custom domains → Set
+up a domain**. Either way you can keep the free `*.workers.dev` or `*.pages.dev` address as well, or
+attach a domain you own (about ₹500–1,200/year). Nothing else in the project changes.
 
 ### What the free tier includes
 
@@ -265,6 +292,7 @@ mandir-marg/
 │  ├─ robots.txt              Crawler rules
 │  └─ _headers                Security headers, applied to static assets by Cloudflare
 ├─ src/worker.js              Worker: /api/temples proxy, everything else to ASSETS
+├─ functions/api/temples.js   Pages Function: same proxy for the Pages deployment
 ├─ wrangler.jsonc             Worker config: assets directory, binding, /api/* routing
 ├─ supabase/schema.sql        `temple_suggestions` table with insert-only RLS
 ├─ docs/                      README screenshots (not deployed)
@@ -279,8 +307,9 @@ mandir-marg/
 1. `app.js` reads the saved view (or defaults to Varanasi), shows the map, and asks
    `/api/temples` for temples.
 2. `worker.js` validates `lat`, `lng` and `radius`, checks Cloudflare's edge cache, otherwise
-   tries four Overpass mirrors in order and caches the result for 30 minutes. Any other URL is
-   handed to the `ASSETS` binding and served as a static file.
+   tries four Overpass mirrors in order and caches the result for 30 minutes. On the Worker
+   deployment, any other URL is handed to the `ASSETS` binding; on Pages, the static files are
+   served by Pages and `functions/api/temples.js` runs the same handler for `/api/temples`.
 3. `app.js` turns OSM elements and approved community records into temple records, merges the two
    sources, sorts by distance, draws clustered pins and fills the list. Community pins and cards
    are marked. Search filters locally first; if nothing matches, Photon geocodes the place and the

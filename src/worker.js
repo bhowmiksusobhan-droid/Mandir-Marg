@@ -76,7 +76,7 @@ async function fetchFromMirrors(query) {
   return null;
 }
 
-async function handleTemples(request, ctx) {
+export async function handleTemples(request, ctx) {
   const url = new URL(request.url);
 
   const lat = Number.parseFloat(url.searchParams.get("lat"));
@@ -136,20 +136,32 @@ async function handleTemples(request, ctx) {
   return response;
 }
 
+/**
+ * Shared route handler. Returns a Response for /api/temples, or null when the
+ * request is not the temple API. The Worker uses it before falling back to
+ * static assets; the Pages Function in functions/api/temples.js reuses it.
+ */
+export async function handleTemplesRoute(request, ctx) {
+  const url = new URL(request.url);
+
+  if (url.pathname !== "/api/temples" && url.pathname !== "/api/temples/") {
+    return null;
+  }
+
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return json({ error: "Use GET for this endpoint." }, 405, {
+      Allow: "GET, HEAD",
+      "Cache-Control": "no-store"
+    });
+  }
+
+  return handleTemples(request, ctx);
+}
+
 export default {
   async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-
-    if (url.pathname === "/api/temples" || url.pathname === "/api/temples/") {
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        return json({ error: "Use GET for this endpoint." }, 405, {
-          Allow: "GET, HEAD",
-          "Cache-Control": "no-store"
-        });
-      }
-      return handleTemples(request, ctx);
-    }
-
+    const handled = await handleTemplesRoute(request, ctx);
+    if (handled) return handled;
     return env.ASSETS.fetch(request);
   }
 };
