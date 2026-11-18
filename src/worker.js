@@ -28,7 +28,13 @@ const MIRRORS = [
 // Overpass asks clients to identify themselves. Without this header some
 // mirrors answer 406/403 even for a valid query.
 const USER_AGENT = "MandirMarg/1.0 (+https://mandir-marg.pages.dev; temple map proxy)";
-const MIRROR_TIMEOUT_MS = 10000;
+
+// Cloudflare's own network cannot reach most public Overpass instances on a
+// regular basis (overpass-api.de answers 521, several mirrors time out), so
+// treat this proxy as a cache that may fail: spend a bounded total time and
+// return a clean 502 rather than holding the request open.
+const MIRROR_TIMEOUT_MS = 6000;
+const TOTAL_MIRROR_BUDGET_MS = 12000;
 
 const ALLOWED_RADII = new Set([5000, 10000, 25000, 50000]);
 
@@ -53,10 +59,14 @@ out center 300;`;
 
 async function fetchFromMirrors(query) {
   let lastError = null;
+  const deadline = Date.now() + TOTAL_MIRROR_BUDGET_MS;
 
   for (const mirror of MIRRORS) {
+    const remaining = deadline - Date.now();
+    if (remaining < 1000) break;
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), MIRROR_TIMEOUT_MS);
+    const timer = setTimeout(() => controller.abort(), Math.min(MIRROR_TIMEOUT_MS, remaining));
     try {
       const response = await fetch(mirror, {
         method: "POST",

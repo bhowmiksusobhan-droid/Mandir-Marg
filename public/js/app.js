@@ -23,6 +23,12 @@
   const CACHE_TTL = 6 * 60 * 60 * 1000;
   const MAX_CACHED_AREAS = 6;
 
+  // How long the edge proxy may take before we also ask Overpass directly.
+  // A warm Cloudflare cache answers in well under a second; a cold or broken
+  // proxy should not delay the map.
+  const PROXY_HEAD_START_MS = 1500;
+  const PROXY_TIMEOUT_MS = 9000;
+
   const MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
   const PHOTON_URL = "https://photon.komoot.io/api/";
   const BASEMAP_KEY = "mandirMarg.basemap.v1";
@@ -483,7 +489,7 @@ out center 300;`;
     }).toString();
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 20000);
+    const timer = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
     try {
       const response = await fetch(url.toString(), {
         headers: { Accept: "application/json" },
@@ -506,14 +512,44 @@ out center 300;`;
     }
   }
 
+  /**
+   * Settle with the first source that produces temples, and reject only when
+   * every source has failed.
+   */
+  function firstSuccess(promises) {
+    return new Promise((resolve, reject) => {
+      let failures = 0;
+      let lastError = null;
+      promises.forEach((promise) => {
+        promise.then(resolve, (error) => {
+          lastError = error || lastError;
+          failures += 1;
+          if (failures === promises.length) reject(lastError);
+        });
+      });
+    });
+  }
+
+  /**
+   * Load temples from whichever source answers first. The cached edge proxy
+   * gets a short head start so a warm cache wins without touching Overpass.
+   * Public Overpass mirrors are frequently unreachable from Cloudflare's own
+   * network, so waiting for the proxy to fail would stall every page load.
+   */
   async function fetchTempleElements(lat, lng, radius) {
-    try {
+    const proxy = (async () => {
       const elements = await fetchViaProxy(lat, lng, radius);
-      if (elements) return elements;
-    } catch (error) {
-      console.warn("Temple proxy unavailable; contacting OpenStreetMap directly.", error);
-    }
-    return fetchOverpass(buildOverpassQuery(lat, lng, radius));
+      // This host has no proxy function (static hosting, file preview, etc.).
+      if (!elements) throw new Error("No temple proxy on this host");
+      return elements;
+    })();
+
+    const direct = (async () => {
+      await new Promise((resolve) => setTimeout(resolve, PROXY_HEAD_START_MS));
+      return fetchOverpass(buildOverpassQuery(lat, lng, radius));
+    })();
+
+    return firstSuccess([proxy, direct]);
   }
 
   function elementToTemple(element) {
