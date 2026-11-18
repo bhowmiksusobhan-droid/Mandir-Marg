@@ -15,6 +15,20 @@ logic. Coordinates for way/relation geometries are reduced to a bbox centre.
 
 Usage:
     python tools/build_temple_data.py --pbf india.osm.pbf --out public/data/temples
+
+A Geofabrik extract is the complete source, but scanning all of India in the
+Python binding takes a long time. For a small beta area it is much quicker to
+export the same temples from Overpass and convert that:
+
+    curl -X POST https://overpass-api.de/api/interpreter \\
+      --data-urlencode 'data=[out:json][timeout:120];
+        area["ISO3166-2"="IN-TR"]->.tr;
+        (nwr["amenity"="place_of_worship"]["religion"="hindu"](area.tr);
+         nwr["building"="temple"]["religion"="hindu"](area.tr););
+        out center 5000;' > tripura.json
+
+    python tools/build_temple_data.py --overpass-json tripura.json \\
+      --out public/data/temples --cell-file
 """
 
 from __future__ import annotations
@@ -149,7 +163,11 @@ def main() -> int:
     global CELL_DEGREES
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pbf", required=True, help="Path to the .osm.pbf extract")
+    parser.add_argument("--pbf", help="Path to the .osm.pbf extract")
+    parser.add_argument(
+        "--overpass-json",
+        help="Path to an Overpass 'out center' JSON export (faster for a small area)",
+    )
     parser.add_argument("--out", required=True, help="Output directory, e.g. public/data/temples")
     parser.add_argument("--cell", type=float, default=CELL_DEGREES, help="Grid size in degrees")
     parser.add_argument(
@@ -173,24 +191,83 @@ def main() -> int:
             return 2
         bbox = values
 
-    if not os.path.exists(args.pbf):
-        print(f"error: {args.pbf} not found", file=sys.stderr)
+    if not args.pbf and not args.overpass_json:
+        print("error: give --pbf or --overpass-json", file=sys.stderr)
+        return 2
+    if args.pbf and args.overpass_json:
+        print("error: --pbf and --overpass-json are alternatives, not both", file=sys.stderr)
         return 2
 
-    print(f"pass 1/2: scanning {args.pbf}", flush=True)
-    scan = TempleScan()
-    scan.apply_file(args.pbf)
-    print(
-        f"  nodes={len(scan.nodes)} ways={len(scan.ways)} "
-        f"relations={len(scan.relations)} needed_nodes={len(scan.needed_nodes)}",
-        flush=True,
-    )
+    records: list[tuple[str, int, float, float, dict]] = []
 
-    print("pass 2/2: resolving way/relation centres", flush=True)
-    collector = NodeCollector(scan.needed_nodes)
-    collector.apply_file(args.pbf)
-    coords = collector.coords
-    print(f"  resolved {len(coords)} node coordinates", flush=True)
+    if args.overpass_json:
+        if not os.path.exists(args.overpass_json):
+            print(f"error: {args.overpass_json} not found", file=sys.stderr)
+            return 2
+        print(f"reading {args.overpass_json}", flush=True)
+        with open(args.overpass_json, encoding="utf-8") as handle:
+            payload = json.load(handle)
+        for element in payload.get("elements", []):
+            tags = element.get("tags") or {}
+            if not is_temple(tags):
+                continue
+            osm_type = element.get("type")
+            osm_id = element.get("id")
+            if osm_type == "node":
+                lat, lng = element.get("lat"), element.get("lon")
+            else:
+                centre_point = element.get("center") or {}
+                lat, lng = centre_point.get("lat"), centre_point.get("lon")
+            if not isinstance(osm_id, int) or lat is None or lng is None:
+                continue
+            records.append((osm_type, osm_id, float(lat), float(lng), kept_tags(tags)))
+        print(f"  {len(records)} Hindu temples in the export", flush=True)
+    else:
+        if not os.path.exists(args.pbf):
+            print(f"error: {args.pbf} not found", file=sys.stderr)
+            return 2
+
+        print(f"pass 1/2: scanning {args.pbf}", flush=True)
+        scan = TempleScan()
+        scan.apply_file(args.pbf)
+        print(
+            f"  nodes={len(scan.nodes)} ways={len(scan.ways)} "
+            f"relations={len(scan.relations)} needed_nodes={len(scan.needed_nodes)}",
+            flush=True,
+        )
+
+        print("pass 2/2: resolving way/relation centres", flush=True)
+        collector = NodeCollector(scan.needed_nodes)
+        collector.apply_file(args.pbf)
+        coords = collector.coords
+        print(f"  resolved {len(coords)} node coordinates", flush=True)
+
+        records.extend(scan.nodes)
+
+        skipped_ways = 0
+        for osm_id, refs, tags in scan.ways:
+            found = [coords[ref] for ref in refs if ref in coords]
+            point = centre(found)
+            if point is None:
+                skipped_ways += 1
+                continue
+            records.append(("way", osm_id, point[0], point[1], tags))
+
+        skipped_relations = 0
+        for osm_id, refs, tags in scan.relations:
+            found = [coords[ref] for ref in refs if ref in coords]
+            point = centre(found)
+            if point is None:
+                skipped_relations += 1
+                continue
+            records.append(("relation", osm_id, point[0], point[1], tags))
+
+        if skipped_ways or skipped_relations:
+            print(
+                f"  skipped {skipped_ways} ways, {skipped_relations} relations "
+                "without resolvable geometry",
+                flush=True,
+            )
 
     cells: dict[tuple[int, int], list[dict]] = defaultdict(list)
     seen: set[tuple[str, int]] = set()
@@ -215,26 +292,8 @@ def main() -> int:
             }
         )
 
-    for osm_id, lat, lng, tags in scan.nodes:
-        emit("node", osm_id, lat, lng, tags)
-
-    skipped_ways = 0
-    for osm_id, refs, tags in scan.ways:
-        found = [coords[ref] for ref in refs if ref in coords]
-        point = centre(found)
-        if point is None:
-            skipped_ways += 1
-            continue
-        emit("way", osm_id, point[0], point[1], tags)
-
-    skipped_relations = 0
-    for osm_id, refs, tags in scan.relations:
-        found = [coords[ref] for ref in refs if ref in coords]
-        point = centre(found)
-        if point is None:
-            skipped_relations += 1
-            continue
-        emit("relation", osm_id, point[0], point[1], tags)
+    for osm_type, osm_id, lat, lng, tags in records:
+        emit(osm_type, osm_id, lat, lng, tags)
 
     os.makedirs(args.out, exist_ok=True)
     for name in os.listdir(args.out):
@@ -281,11 +340,7 @@ def main() -> int:
                 separators=(",", ":"),
             )
 
-    print(
-        f"wrote {len(cells)} cells, {total} temples "
-        f"(skipped {skipped_ways} ways, {skipped_relations} relations)",
-        flush=True,
-    )
+    print(f"wrote {len(cells)} cells, {total} temples", flush=True)
     return 0
 
 

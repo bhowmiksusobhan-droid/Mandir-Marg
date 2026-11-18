@@ -345,35 +345,54 @@ mandir-marg/
 
 ### Refreshing the built-in temple data
 
-`public/data/temples/` holds every named Hindu temple in the OpenStreetMap India extract, split
-into small per-cell files. Rebuild it when you want fresher data (monthly is plenty):
+`public/data/temples/` holds the named Hindu temples of the beta area, split into small per-cell
+files. Rebuild it when you want fresher data (monthly is plenty). There are two sources; pick one.
+
+**Overpass export (quick, good for one state).** This is how the current Tripura files were made:
 
 ```bash
-# 1. Download the India extract (about 1.7 GB)
-curl -L -o india.osm.pbf https://download.geofabrik.de/asia/india-latest.osm.pbf
+curl -X POST https://overpass-api.de/api/interpreter \
+  --data-urlencode 'data=[out:json][timeout:120];
+    area["ISO3166-2"="IN-TR"]->.tr;
+    (nwr["amenity"="place_of_worship"]["religion"="hindu"](area.tr);
+     nwr["building"="temple"]["religion"="hindu"](area.tr););
+    out center 5000;' > tripura.json
 
-# 2. Extract Hindu places of worship into public/data/temples/
+python tools/build_temple_data.py --overpass-json tripura.json \
+  --out public/data/temples --cell-file
+```
+
+The area lookup keeps the result inside the state boundary, unlike a rectangle: a plain bbox
+around Tripura would also sweep in temples across the border in Bangladesh.
+
+**Geofabrik extract (complete, any area).** This reads the whole country offline:
+
+```bash
+curl -L -o india.osm.pbf https://download.geofabrik.de/asia/india-latest.osm.pbf
 pip install osmium
 python tools/build_temple_data.py --pbf india.osm.pbf --out public/data/temples \
   --bbox 22.85,91.05,24.70,92.45 --cell-file
 ```
 
-`--bbox south,west,north,east` keeps only the beta area (Tripura above) so the repository stays
-small. Drop it to build the whole country. The script writes one file per 2° cell plus `index.json`
-with the cell list and counts. Commit the result and push; Cloudflare redeploys automatically. The
-app downloads only the cells that overlap the current view, so a visitor typically fetches a few
-hundred kilobytes.
+`--bbox south,west,north,east` keeps only that rectangle so the repository stays small; drop it to
+build the whole country. Scanning all of India with the Python binding is slow (tens of minutes), so
+the Overpass route is usually better for a small beta area.
+
+Either way the script writes one file per 2° cell plus `index.json` with the cell list and counts.
+Commit the result and push; Cloudflare redeploys automatically. The app downloads only the cells
+that overlap the current view, so a visitor typically fetches a few kilobytes.
 
 ### Expanding beyond Tripura
 
-The beta area is defined in two places, and they must agree:
+The beta area is defined in three places, and they must agree:
 
 1. `SERVICE_AREA` in `public/js/app.js` — the bounding box used for the map limits, search results
    and the "near me" check.
 2. The notice in `public/index.html` (`.beta-notice`) — the sentence visitors read.
+3. The dataset in `public/data/temples/` — rebuild it for the new area.
 
-To add a state: widen the bounding box (or make it a list of boxes), rebuild the dataset with the
-matching `--bbox` (or without it), and update the notice text. Nothing else is state-specific.
+To add a state: widen the bounding box (or make it a list of boxes), rebuild the dataset, and update
+the notice text. Nothing else is state-specific.
 
 The **weather/AQI widget** uses Open-Meteo, which needs no key. It appears bottom-left on the map
 and follows the map centre, refreshing at most every ten minutes per area. If the service is

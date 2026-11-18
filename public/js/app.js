@@ -875,7 +875,14 @@ out center 300;`;
     // quickly and in practice never fail. Render them first, then refine the
     // list once live OpenStreetMap data arrives.
     const seedPromise = loadSeedElements(lat, lng, radius)
-      .then((elements) => elements.map(elementToTemple).filter(Boolean))
+      .then((elements) =>
+        elements
+          .map(elementToTemple)
+          .filter(Boolean)
+          // A cell is two degrees wide, much larger than any search radius, so
+          // trim it here. Live Overpass results are already limited by radius.
+          .filter((temple) => distanceMeters(lat, lng, temple.lat, temple.lng) <= radius)
+      )
       .catch((error) => {
         console.warn("Built-in temple data is unavailable", error);
         return [];
