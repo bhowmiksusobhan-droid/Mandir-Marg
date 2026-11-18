@@ -16,12 +16,19 @@
  */
 
 const MIRRORS = [
-  // Server-side requests do not need CORS, so the fast French mirror comes first.
-  "https://overpass.openstreetmap.fr/api/interpreter",
+  // Server-side requests do not need CORS. Order matters: overpass-api.de is
+  // the most reliable for data-centre clients, while the French mirror often
+  // rejects them with HTTP 403, so it comes last.
   "https://overpass-api.de/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
   "https://overpass.kumi.systems/api/interpreter",
-  "https://overpass.private.coffee/api/interpreter"
+  "https://overpass.openstreetmap.fr/api/interpreter"
 ];
+
+// Overpass asks clients to identify themselves. Without this header some
+// mirrors answer 406/403 even for a valid query.
+const USER_AGENT = "MandirMarg/1.0 (+https://mandir-marg.pages.dev; temple map proxy)";
+const MIRROR_TIMEOUT_MS = 10000;
 
 const ALLOWED_RADII = new Set([5000, 10000, 25000, 50000]);
 
@@ -49,13 +56,14 @@ async function fetchFromMirrors(query) {
 
   for (const mirror of MIRRORS) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 18000);
+    const timer = setTimeout(() => controller.abort(), MIRROR_TIMEOUT_MS);
     try {
       const response = await fetch(mirror, {
         method: "POST",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          Accept: "application/json"
+          Accept: "application/json",
+          "User-Agent": USER_AGENT
         },
         body: `data=${encodeURIComponent(query)}`,
         signal: controller.signal
