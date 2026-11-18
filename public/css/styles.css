@@ -162,6 +162,39 @@ textarea {
   letter-spacing: 0.025em;
 }
 
+.brand h1 .badge-beta {
+  display: inline-block;
+  margin-left: 7px;
+  padding: 2px 8px;
+  border: 1px solid rgba(240, 197, 114, 0.7);
+  border-radius: 999px;
+  background: rgba(255, 210, 130, 0.16);
+  color: #f8dc9d;
+  font-family: var(--font-body);
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  line-height: 1.5;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
+/* Development scope notice, shown under the header. */
+.beta-notice {
+  margin: 0;
+  padding: 7px clamp(16px, 3vw, 32px);
+  border-bottom: 1px solid var(--line);
+  background: #fff6e2;
+  color: #6a5433;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.beta-notice strong {
+  color: var(--maroon);
+}
+
 .header-actions {
   display: flex;
   flex-wrap: wrap;
@@ -477,6 +510,99 @@ textarea {
 
 .basemap-toggle[hidden] {
   display: none;
+}
+
+/* ---------- Weather + air quality (map overlay) ---------- */
+
+.weather-widget {
+  position: absolute;
+  z-index: 5;
+  left: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  max-width: calc(100% - 90px);
+  padding: 7px 11px 7px 9px;
+  border: 1px solid rgba(216, 197, 162, 0.9);
+  border-radius: 14px;
+  background: rgba(255, 252, 245, 0.95);
+  color: #4b3a26;
+  box-shadow: var(--shadow-sm);
+  font-size: 0.76rem;
+  line-height: 1.15;
+  pointer-events: none;
+  backdrop-filter: blur(4px);
+}
+
+.weather-widget[hidden] {
+  display: none;
+}
+
+.weather-glyph {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+
+.weather-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.weather-temp {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.weather-desc {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aqi-chip {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: #ece4d4;
+  color: #5b4a35;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.aqi-chip.is-good {
+  background: #dff2df;
+  color: #245c2a;
+}
+
+.aqi-chip.is-moderate {
+  background: #fdf0c9;
+  color: #7a5a10;
+}
+
+.aqi-chip.is-poor {
+  background: #ffe2c2;
+  color: #8a4510;
+}
+
+.aqi-chip.is-bad {
+  background: #ffd4d0;
+  color: #8c1d16;
+}
+
+.aqi-chip.is-very-bad {
+  background: #edd6f5;
+  color: #5d2170;
+}
+
+.aqi-chip.is-hazard {
+  background: #6b1d1d;
+  color: #fff3e0;
 }
 
 /* Instruction shown while placing a temple pin. */
@@ -853,30 +979,6 @@ textarea {
   margin: 0 auto 16px;
   color: var(--muted);
   font-size: 0.88rem;
-}
-
-.contribute-card {
-  margin-top: 16px;
-  padding: 14px 16px;
-  border: 1px dashed var(--line-strong);
-  border-radius: var(--radius);
-  background: #fffaf0;
-}
-
-.contribute-card p {
-  margin: 0 0 10px;
-  color: var(--muted);
-  font-size: 0.84rem;
-}
-
-.contribute-card strong {
-  color: var(--ink);
-}
-
-.contribute-card .btn {
-  min-height: 38px;
-  padding: 8px 14px;
-  font-size: 0.84rem;
 }
 
 /* Contributions drawer */
@@ -1344,6 +1446,25 @@ dialog:modal {
 
   .tagline {
     font-size: 0.68rem;
+  }
+
+  .beta-notice {
+    padding: 6px 14px;
+    font-size: 0.72rem;
+    text-align: left;
+  }
+
+  .weather-widget {
+    gap: 7px;
+    padding: 6px 9px;
+  }
+
+  .weather-desc {
+    display: none;
+  }
+
+  .aqi-chip {
+    font-size: 0.62rem;
   }
 
   .field-row {

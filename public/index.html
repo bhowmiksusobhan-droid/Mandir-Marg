@@ -41,7 +41,7 @@
     <a class="brand" href="./" aria-label="Mandir Marg home">
       <img class="brand-mark" src="icons/icon.svg" alt="" width="46" height="46">
       <span class="brand-text">
-        <h1>Mandir Marg</h1>
+        <h1>Mandir Marg <span class="badge-beta">Beta</span></h1>
         <p class="tagline"><span lang="hi">मंदिर मार्ग</span> · the way to the temple</p>
       </span>
     </a>
@@ -50,6 +50,11 @@
       <button class="btn btn-primary" type="button" data-open-add>+ Add a temple</button>
     </div>
   </header>
+
+  <p class="beta-notice" role="note">
+    <strong>Beta</strong> — Mandir Marg is still in development and currently lists temples in
+    <strong>Tripura</strong> only. More states will be added as their data is checked.
+  </p>
 
   <main class="app-shell">
     <section class="search-panel" aria-labelledby="search-heading">
@@ -88,6 +93,15 @@
         <span>Tap the temple on the satellite map to place its pin.</span>
         <button class="btn btn-ghost" type="button" id="cancel-pick">Cancel</button>
       </div>
+
+      <aside id="weather" class="weather-widget" aria-label="Weather and air quality at the map centre" hidden>
+        <span class="weather-glyph" id="weather-glyph" aria-hidden="true">🌤️</span>
+        <span class="weather-body">
+          <span class="weather-temp" id="weather-temp">—</span>
+          <span class="weather-desc" id="weather-desc">Weather</span>
+        </span>
+        <span class="aqi-chip" id="weather-aqi">AQI —</span>
+      </aside>
       <noscript>
         <p class="noscript-note">The interactive map needs JavaScript. Please enable it, or use the temple list.</p>
       </noscript>
@@ -100,13 +114,7 @@
       <div id="empty-state" class="empty" hidden>
         <span class="empty-icon" aria-hidden="true">🛕</span>
         <h3>No temples found here yet</h3>
-        <p>Try a larger radius, search for a city, or add a temple you know.</p>
-        <button class="btn btn-primary" type="button" data-open-add>Add a temple</button>
-      </div>
-
-      <div class="contribute-card">
-        <p><strong>Is a temple missing?</strong> Help other devotees find it by adding its details to the map.</p>
-        <button class="btn btn-secondary" type="button" data-open-add>Add a temple</button>
+        <p>Try a larger radius or search for a town in Tripura. Know a temple that is missing? Use <strong>+ Add a temple</strong> at the top.</p>
       </div>
 
       <details id="my-contributions" class="contributions" hidden>

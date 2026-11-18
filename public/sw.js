@@ -3,7 +3,7 @@
  * Map tiles, Overpass responses and other cross-origin requests are never cached.
  */
 
-const VERSION = "mandir-marg-v1.4.0";
+const VERSION = "mandir-marg-v1.5.0";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -75,8 +75,9 @@ self.addEventListener("fetch", (event) => {
   if (url.pathname.includes("/api/")) return;
 
   // Published community data changes when a moderator approves a temple. Always
-  // ask the network so a new approval appears immediately.
-  if (url.pathname.includes("/data/")) return;
+  // ask the network so a new approval appears immediately. The built-in temple
+  // cells under /data/temples/ are static and do get cached below.
+  if (url.pathname.includes("/data/community-temples.json")) return;
 
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request));

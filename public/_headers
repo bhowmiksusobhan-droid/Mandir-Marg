@@ -4,7 +4,7 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: geolocation=(self), camera=(), microphone=(), payment=()
-  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://overpass-api.de https://overpass.kumi.systems https://overpass.private.coffee https://photon.komoot.io https://tiles.openfreemap.org https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://server.arcgisonline.com https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests
+  Content-Security-Policy: default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self' https://unpkg.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://overpass-api.de https://overpass.kumi.systems https://overpass.private.coffee https://photon.komoot.io https://tiles.openfreemap.org https://tile.openstreetmap.org https://*.tile.openstreetmap.org https://server.arcgisonline.com https://api.open-meteo.com https://air-quality-api.open-meteo.com https://*.supabase.co; worker-src 'self' blob:; manifest-src 'self'; upgrade-insecure-requests
 
 # Long-lived caching for static assets
 /css/*
@@ -16,3 +16,6 @@
 # Approved community data changes on each deploy; keep it fresh.
 /data/*
   Cache-Control: public, max-age=300, must-revalidate
+# Built-in temple cells only change when the dataset is rebuilt.
+/data/temples/*
+  Cache-Control: public, max-age=86400, stale-while-revalidate=604800

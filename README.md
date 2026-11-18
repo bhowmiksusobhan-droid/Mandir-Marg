@@ -2,26 +2,32 @@
 
 **A free, always-online, community-maintained map of Hindu temples.**
 
+> **Beta.** Mandir Marg is still in development and currently lists temples in **Tripura** only.
+> The search, map and contribution form are limited to that state until its data has been checked.
+> More states will follow; see [Expanding beyond Tripura](#expanding-beyond-tripura).
+
 Mandir Marg ("the way to the temple") helps devotees find Hindu temples near them, learn a little
 about each one, and add temples that are missing. It is a plain static website: no build step, no
 framework, no server of your own to maintain. Everything runs on free tiers.
 
 - **Live map** of Hindu temples from OpenStreetMap, clustered and searchable
 - **Street or satellite view** — switch to Esri imagery to spot a temple roof, then tap the map to place its pin exactly
-- **Find temples near me** using the browser's location, or search any city or town
+- **Find temples near me** using the browser's location, or search any town in Tripura
+- **Weather and air quality** at the map centre, from Open-Meteo (no key, no tracking)
 - **Photo contributions** — a geotagged photo places the pin automatically, and EXIF is stripped before publishing
 - **Approval becomes publication** — moderator-approved temples appear on the map from a small community file
 - **Duplicate warning** — if a temple is already mapped within 80 m, the form asks before saving a second pin
 - **Share a temple** — a link opens the map on that temple, ready to send on WhatsApp
 - **Suggest a temple or an edit** from a phone-friendly form
 - **Installable PWA** — add it to your home screen; the app shell works offline
+- **Built-in temple data** — a static dataset keeps the map working even when Overpass is down
 - **Donations stay official** — v1 only shows a temple's own website/phone; it never handles money
 
-![Mandir Marg map showing clustered Hindu temples around Varanasi](docs/screenshot.png)
+![Mandir Marg map showing clustered Hindu temples around Agartala](docs/screenshot.png)
 
 Switch to **Satellite** to recognise a temple roof, then tap the map to drop its pin precisely.
 
-![Satellite view of Varanasi with temple pins and place labels](docs/satellite.png)
+![Satellite view of Agartala with temple pins and place labels](docs/satellite.png)
 
 ---
 
@@ -285,6 +291,7 @@ mandir-marg/
 │  ├─ js/app.js               Map, temple merge, search, geolocation, form, photos, PWA
 │  ├─ js/exif.js              Tiny EXIF GPS reader (no dependency, no upload)
 │  ├─ data/community-temples.json  Approved community temples (published by the tool)
+│  ├─ data/temples/            Built-in temple dataset, one JSON file per 2° cell
 │  ├─ data/photos/            Photos published from approved contributions
 │  ├─ manifest.webmanifest    Installable app metadata
 │  ├─ sw.js                   Service worker: app shell offline, 6-hour data cache
@@ -297,6 +304,7 @@ mandir-marg/
 ├─ supabase/schema.sql        `temple_suggestions` table with insert-only RLS
 ├─ docs/                      README screenshots (not deployed)
 ├─ tools/dev_server.py        Local server + proxy emulator (no dependencies)
+├─ tools/build_temple_data.py Build data/temples/ from a Geofabrik OSM extract
 ├─ tools/publish_temples.py   Approved Supabase rows → community JSON + photos
 ├─ tools/make-icons.py        Regenerates the PNG icons with Pillow
 └─ start.bat                  One-click local preview on Windows
@@ -304,16 +312,18 @@ mandir-marg/
 
 ### How the pieces fit
 
-1. `app.js` reads the saved view (or defaults to Varanasi), shows the map, and asks
-   `/api/temples` for temples.
+1. `app.js` reads the saved view (or defaults to Agartala), shows the map, loads the few
+   `data/temples/` cells that cover the view, and asks `/api/temples` for live temples.
 2. `worker.js` validates `lat`, `lng` and `radius`, checks Cloudflare's edge cache, otherwise
-   tries four Overpass mirrors in order and caches the result for 30 minutes. On the Worker
-   deployment, any other URL is handed to the `ASSETS` binding; on Pages, the static files are
-   served by Pages and `functions/api/temples.js` runs the same handler for `/api/temples`.
-3. `app.js` turns OSM elements and approved community records into temple records, merges the two
-   sources, sorts by distance, draws clustered pins and fills the list. Community pins and cards
-   are marked. Search filters locally first; if nothing matches, Photon geocodes the place and the
-   map moves there.
+   tries four Overpass mirrors within a 12 s budget and caches the result for 30 minutes. On the
+   Worker deployment, any other URL is handed to the `ASSETS` binding; on Pages, the static files
+   are served by Pages and `functions/api/temples.js` runs the same handler for `/api/temples`.
+   The browser gives the proxy a 1.5 s head start, then calls Overpass directly as well, so a
+   slow or unreachable proxy never holds the page back.
+3. `app.js` turns OSM elements and approved community records into temple records, merges the
+   built-in list with the live one (live wins at the same spot), sorts by distance, draws
+   clustered pins and fills the list. Community pins and cards are marked. Search filters locally
+   first; if nothing matches, Photon geocodes the place and the map moves there.
 4. "Pick the exact spot" closes the form, switches to satellite imagery, zooms to rooftop scale and
    takes the tapped coordinate, then reopens the form with the pin placed.
 5. Choosing a photo reads its EXIF GPS in the browser, downscales it through a canvas (which
@@ -330,6 +340,44 @@ mandir-marg/
 - Radius options: `#radius` in `public/index.html` and `ALLOWED_RADII` in `src/worker.js`.
 - Result cap: `out center 300;` in `public/js/app.js` and `src/worker.js` (keep both in sync).
 - Default view: `DEFAULT_VIEW` in `public/js/app.js`.
+- Grid size: `--cell` when building the dataset (2° by default) and `SEED_CELL_DEGREES` in
+  `public/js/app.js` must match.
+
+### Refreshing the built-in temple data
+
+`public/data/temples/` holds every named Hindu temple in the OpenStreetMap India extract, split
+into small per-cell files. Rebuild it when you want fresher data (monthly is plenty):
+
+```bash
+# 1. Download the India extract (about 1.7 GB)
+curl -L -o india.osm.pbf https://download.geofabrik.de/asia/india-latest.osm.pbf
+
+# 2. Extract Hindu places of worship into public/data/temples/
+pip install osmium
+python tools/build_temple_data.py --pbf india.osm.pbf --out public/data/temples \
+  --bbox 22.85,91.05,24.70,92.45 --cell-file
+```
+
+`--bbox south,west,north,east` keeps only the beta area (Tripura above) so the repository stays
+small. Drop it to build the whole country. The script writes one file per 2° cell plus `index.json`
+with the cell list and counts. Commit the result and push; Cloudflare redeploys automatically. The
+app downloads only the cells that overlap the current view, so a visitor typically fetches a few
+hundred kilobytes.
+
+### Expanding beyond Tripura
+
+The beta area is defined in two places, and they must agree:
+
+1. `SERVICE_AREA` in `public/js/app.js` — the bounding box used for the map limits, search results
+   and the "near me" check.
+2. The notice in `public/index.html` (`.beta-notice`) — the sentence visitors read.
+
+To add a state: widen the bounding box (or make it a list of boxes), rebuild the dataset with the
+matching `--bbox` (or without it), and update the notice text. Nothing else is state-specific.
+
+The **weather/AQI widget** uses Open-Meteo, which needs no key. It appears bottom-left on the map
+and follows the map centre, refreshing at most every ten minutes per area. If the service is
+unreachable the widget simply stays hidden; nothing else depends on it.
 
 ---
 
@@ -338,19 +386,23 @@ mandir-marg/
 There is no build step, so there is nothing to compile. Before publishing a change:
 
 1. Run `python tools/dev_server.py`.
-2. Search a city, click a pin, add a temple, and reload to confirm the local suggestion persists.
+2. Search a town in Tripura, click a pin, add a temple, and reload to confirm the local suggestion
+   persists.
 3. Switch to **Satellite**, then Add a temple → **Pick the exact spot on the map** and tap a roof.
 4. Add a geotagged photo and check that the pin moves to the photo's location; then try a photo with
    GPS more than 500 m from a manually picked pin and confirm the manual pin is kept.
 5. Try adding a temple within 80 m of an existing pin and confirm the duplicate warning appears.
 6. Click a pin, use **Share**, and open the copied `?temple=` link in a new tab.
-7. Preview the publish step: `python tools/publish_temples.py --input rows.json --dry-run`.
-8. Check the browser console for errors.
-9. Use `python tools/make-icons.py` after editing `public/icons/icon.svg` (needs `pip install pillow`).
+7. Check that the weather chip appears bottom-left on the map and changes after panning.
+8. Search for a place outside Tripura and confirm the beta message appears instead of an empty map.
+9. Preview the publish step: `python tools/publish_temples.py --input rows.json --dry-run`.
+10. Check the browser console for errors.
+11. Use `python tools/make-icons.py` after editing `public/icons/icon.svg` (needs `pip install pillow`).
 
 Cache busting: bump `VERSION` in `public/sw.js` whenever you change the app shell, so installed
-copies update. The service worker never caches `/api/` or `/data/` responses, which keeps temple data
-and newly approved community entries fresh.
+copies update. The service worker never caches `/api/` or `data/community-temples.json`, which
+keeps live temple data and newly approved community entries fresh; the static cells under
+`data/temples/` are cached and revalidated in the background.
 
 ---
 

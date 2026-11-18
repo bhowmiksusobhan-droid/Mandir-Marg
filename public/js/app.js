@@ -11,10 +11,21 @@
   const HAS_SUPABASE = Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 
   const DEFAULT_VIEW = {
-    lat: 25.3176,
-    lng: 82.9739,
-    label: "Varanasi",
+    lat: 23.8315,
+    lng: 91.2868,
+    label: "Agartala",
     radius: 25000
+  };
+
+  // Beta scope: the temple list, search and map are limited to Tripura while the
+  // dataset is being checked. Widen these bounds (and the notice in index.html)
+  // when another state is ready.
+  const SERVICE_AREA = {
+    name: "Tripura",
+    south: 22.85,
+    west: 91.05,
+    north: 24.7,
+    east: 92.45
   };
 
   const VIEW_KEY = "mandirMarg.view.v1";
@@ -33,12 +44,23 @@
   const PHOTON_URL = "https://photon.komoot.io/api/";
   const BASEMAP_KEY = "mandirMarg.basemap.v1";
 
+  // Open-Meteo needs no API key and allows browser requests.
+  const WEATHER_URL = "https://api.open-meteo.com/v1/forecast";
+  const AIR_URL = "https://air-quality-api.open-meteo.com/v1/air-quality";
+  const WEATHER_TTL = 10 * 60 * 1000;
+
   // Temples approved by a moderator are published here as a small static JSON
   // file (see tools/publish_temples.py). Keeping them out of the Overpass query
   // means an approval becomes visible without waiting for OpenStreetMap.
   const COMMUNITY_URL = "data/community-temples.json";
   const DUPLICATE_RADIUS = 80;
   const OSM_DUPLICATE_RADIUS = 60;
+
+  // Temples are also shipped as static grid cells (tools/build_temple_data.py).
+  // They make the map useful even when every Overpass mirror is down, and they
+  // are loaded by cell so a view only downloads what it needs.
+  const SEED_DIR = "data/temples/";
+  const SEED_CELL_DEGREES = 2;
 
   // Photos are downscaled in the browser before they are stored. Canvas export
   // also strips EXIF, so the contributor's device details never go public.
@@ -116,6 +138,11 @@
     cancelPick: $("#cancel-pick"),
     basemapToggle: $(".basemap-toggle"),
     basemapButtons: document.querySelectorAll("[data-basemap]"),
+    weather: $("#weather"),
+    weatherGlyph: $("#weather-glyph"),
+    weatherTemp: $("#weather-temp"),
+    weatherDesc: $("#weather-desc"),
+    weatherAqi: $("#weather-aqi"),
     toast: $("#toast"),
     installBtn: $("#install-app"),
 
@@ -231,6 +258,21 @@
     return 2 * earthRadius * Math.asin(Math.sqrt(a));
   }
 
+  function isInServiceArea(lat, lng) {
+    return (
+      Number.isFinite(lat) &&
+      Number.isFinite(lng) &&
+      lat >= SERVICE_AREA.south &&
+      lat <= SERVICE_AREA.north &&
+      lng >= SERVICE_AREA.west &&
+      lng <= SERVICE_AREA.east
+    );
+  }
+
+  function outsideServiceMessage() {
+    return `Mandir Marg is in beta and covers ${SERVICE_AREA.name} only. Try a town inside ${SERVICE_AREA.name}.`;
+  }
+
   function makeId() {
     if (window.crypto && typeof window.crypto.randomUUID === "function") {
       return window.crypto.randomUUID();
@@ -343,6 +385,7 @@
         typeof saved.lng === "number" &&
         typeof saved.radius === "number" &&
         radii.includes(saved.radius) &&
+        isInServiceArea(saved.lat, saved.lng) &&
         saved.lat >= -90 &&
         saved.lat <= 90 &&
         saved.lng >= -180 &&
@@ -644,8 +687,90 @@ out center 300;`;
     };
   }
 
-  function loadCommunityTemples({ force = false } = {}) {
-    if (force) communityPromise = null;
+  /* ==========================================================================
+     Built-in temple cells (static data)
+     ========================================================================== */
+
+  // Cell files never change during a session, so one fetch per cell is enough.
+  const seedCellCache = new Map();
+
+  function seedCellsFor(lat, lng, radius) {
+    const latSpan = radius / 111320;
+    const cosLat = Math.max(0.15, Math.cos((lat * Math.PI) / 180));
+    const lngSpan = radius / (111320 * cosLat);
+
+    const south = Math.max(-90, lat - latSpan);
+    const north = Math.min(90, lat + latSpan);
+    const west = Math.max(-180, lng - lngSpan);
+    const east = Math.min(180, lng + lngSpan);
+
+    const startLat = Math.floor(south / SEED_CELL_DEGREES) * SEED_CELL_DEGREES;
+    const startLng = Math.floor(west / SEED_CELL_DEGREES) * SEED_CELL_DEGREES;
+
+    const cells = [];
+    for (let cellLat = startLat; cellLat <= north; cellLat += SEED_CELL_DEGREES) {
+      for (let cellLng = startLng; cellLng <= east; cellLng += SEED_CELL_DEGREES) {
+        // A 50 km radius never needs more than a handful of cells; the cap just
+        // protects against a corrupted saved view.
+        if (cells.length >= 16) return cells;
+        cells.push([cellLat, cellLng]);
+      }
+    }
+    return cells;
+  }
+
+  function loadSeedCell(latCell, lngCell) {
+    const name = `${latCell}_${lngCell}.json`;
+    if (seedCellCache.has(name)) return seedCellCache.get(name);
+
+    const promise = (async () => {
+      try {
+        const response = await fetch(new URL(`${SEED_DIR}${name}`, document.baseURI), {
+          headers: { Accept: "application/json" }
+        });
+        // Cells without temples are simply not generated.
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data && Array.isArray(data.elements) ? data.elements : [];
+      } catch (error) {
+        console.warn(`Built-in temple cell ${name} is unavailable`, error);
+        return [];
+      }
+    })();
+
+    seedCellCache.set(name, promise);
+    return promise;
+  }
+
+  async function loadSeedElements(lat, lng, radius) {
+    const cells = seedCellsFor(lat, lng, radius);
+    const lists = await Promise.all(cells.map(([a, b]) => loadSeedCell(a, b)));
+    return lists.flat();
+  }
+
+  /**
+   * Live results win, but identical objects and the same temple mapped twice
+   * (for example a node and its building way) are only shown once.
+   */
+  function mergeTempleLists(primary, secondary) {
+    const byId = new Map();
+    primary.forEach((temple) => byId.set(temple.id, temple));
+
+    const merged = Array.from(byId.values());
+    secondary.forEach((temple) => {
+      if (byId.has(temple.id)) return;
+      const duplicate = merged.some(
+        (item) =>
+          distanceMeters(item.lat, item.lng, temple.lat, temple.lng) <= OSM_DUPLICATE_RADIUS &&
+          namesMatch(item.name, temple.name)
+      );
+      if (!duplicate) merged.push(temple);
+    });
+
+    return merged;
+  }
+
+  function loadCommunityTemples({ force = false } = {}) {    if (force) communityPromise = null;
     if (communityPromise) return communityPromise;
 
     communityPromise = (async () => {
@@ -727,6 +852,11 @@ out center 300;`;
      ========================================================================== */
 
   async function loadTemples({ lat, lng, label, radius, useCache = true, moveMap = true }) {
+    if (!isInServiceArea(lat, lng)) {
+      setStatus(outsideServiceMessage(), { error: true });
+      return;
+    }
+
     const token = (loadToken += 1);
     state.loading = true;
     state.center = { lat, lng, label };
@@ -738,64 +868,98 @@ out center 300;`;
       loading: true
     });
 
-    try {
-      let elements = useCache ? readTempleCache(lat, lng, radius) : null;
-      const fromCache = Boolean(elements);
+    const community = await loadCommunityTemples();
+    if (token !== loadToken) return;
 
-      if (!elements) {
-        elements = await fetchTempleElements(lat, lng, radius);
-        if (token !== loadToken) return;
-        writeTempleCache(lat, lng, radius, elements);
+    // Built-in cells are small files served from our own origin, so they arrive
+    // quickly and in practice never fail. Render them first, then refine the
+    // list once live OpenStreetMap data arrives.
+    const seedPromise = loadSeedElements(lat, lng, radius)
+      .then((elements) => elements.map(elementToTemple).filter(Boolean))
+      .catch((error) => {
+        console.warn("Built-in temple data is unavailable", error);
+        return [];
+      });
+
+    let liveTemples = null;
+    let fromCache = false;
+
+    if (useCache) {
+      const cached = readTempleCache(lat, lng, radius);
+      if (cached) {
+        liveTemples = cached.map(elementToTemple).filter(Boolean);
+        fromCache = true;
       }
+    }
 
-      if (token !== loadToken) return;
+    // Start the live request straight away; it does not wait for the cells.
+    let livePromise = null;
+    if (!liveTemples) {
+      livePromise = (async () => {
+        const elements = await fetchTempleElements(lat, lng, radius);
+        writeTempleCache(lat, lng, radius, elements);
+        return elements.map(elementToTemple).filter(Boolean);
+      })();
+      // The token may make us abandon this result; never leave it unhandled.
+      livePromise.catch(() => {});
+    }
 
-      const osmTemples = elements.map(elementToTemple).filter(Boolean);
-      const community = await loadCommunityTemples();
-      if (token !== loadToken) return;
+    const seedTemples = await seedPromise;
+    if (token !== loadToken) return;
 
-      state.temples = mergeCommunityTemples(osmTemples, community, lat, lng, radius);
+    if (seedTemples.length && !liveTemples) {
+      state.temples = mergeCommunityTemples(seedTemples, community, lat, lng, radius);
+      applyFilters();
+      setStatus(`Showing ${state.temples.length} temples…`, { loading: true });
+    }
 
-      state.loading = false;
-      els.list.setAttribute("aria-busy", "false");
+    let liveFailed = false;
+    if (livePromise) {
+      try {
+        liveTemples = await livePromise;
+        if (token !== loadToken) return;
+      } catch (error) {
+        if (token !== loadToken) return;
+        console.warn("Live temple data is unavailable; using the built-in list.", error);
+        liveFailed = true;
+        const stale = readTempleCache(lat, lng, radius, true);
+        liveTemples = stale ? stale.map(elementToTemple).filter(Boolean) : [];
+        fromCache = Boolean(stale);
+      }
+    }
 
-      if (moveMap && state.map) {
-        state.map.flyTo({
-          center: [lng, lat],
-          zoom: zoomForRadius(radius),
-          duration: prefersReducedMotion() ? 0 : 900
+    if (token !== loadToken) return;
+
+    state.loading = false;
+    els.list.setAttribute("aria-busy", "false");
+
+    if (moveMap && state.map) {
+      state.map.flyTo({
+        center: [lng, lat],
+        zoom: zoomForRadius(radius),
+        duration: prefersReducedMotion() ? 0 : 900
+      });
+    }
+
+    state.temples = mergeCommunityTemples(
+      mergeTempleLists(liveTemples, seedTemples),
+      community,
+      lat,
+      lng,
+      radius
+    );
+    applyFilters();
+
+    if (liveFailed) {
+      if (state.temples.length) {
+        updateSummary("Live OpenStreetMap data is unavailable right now.", { error: true });
+      } else {
+        setStatus("Could not reach the temple database. Check your connection and try again.", {
+          error: true
         });
       }
-
-      applyFilters();
-      updateSummary(fromCache ? "Showing saved results." : "");
-    } catch (error) {
-      if (token !== loadToken) return;
-      console.error("Temple load failed", error);
-      state.loading = false;
-      els.list.setAttribute("aria-busy", "false");
-
-      const stale = readTempleCache(lat, lng, radius, true);
-      const community = await loadCommunityTemples();
-      if (token !== loadToken) return;
-
-      const osmTemples = stale ? stale.map(elementToTemple).filter(Boolean) : [];
-      state.temples = mergeCommunityTemples(osmTemples, community, lat, lng, radius);
-      applyFilters();
-
-      if (state.temples.length) {
-        setStatus(
-          stale
-            ? "Could not refresh right now. Showing saved temple results."
-            : "OpenStreetMap is unavailable right now. Showing community temples.",
-          { error: true }
-        );
-      } else {
-        setStatus(
-          "Could not reach the temple database. Check your connection and try again.",
-          { error: true }
-        );
-      }
+    } else if (fromCache) {
+      updateSummary("Showing saved results.");
     }
   }
 
@@ -912,7 +1076,7 @@ out center 300;`;
     highlightList();
   }
 
-  function updateSummary(extra = "") {
+  function updateSummary(extra = "", { error = false } = {}) {
     if (state.loading) return;
 
     const filtered = getFilteredTemples();
@@ -931,7 +1095,7 @@ out center 300;`;
       message = `No named Hindu temples found within ${radiusKm} km of ${state.center.label}. Try a larger radius or add one you know.`;
     }
 
-    setStatus(extra ? `${message} ${extra}` : message);
+    setStatus(extra ? `${message} ${extra}` : message, { error });
   }
 
   function applyFilters() {
@@ -1226,10 +1390,152 @@ out center 300;`;
       hideMapHint();
       if (pickingLocation) finishPicking(event.lngLat);
     });
+
+    let weatherTimer = null;
+    map.on("moveend", () => {
+      clearTimeout(weatherTimer);
+      weatherTimer = setTimeout(() => {
+        const center = map.getCenter();
+        updateWeather(center.lat, center.lng);
+      }, 700);
+    });
   }
 
   function hideMapHint() {
     if (els.mapHint) els.mapHint.classList.add("is-hidden");
+  }
+
+  /* ==========================================================================
+     Weather + air quality overlay
+     ========================================================================== */
+
+  // WMO weather interpretation codes used by Open-Meteo.
+  const WEATHER_CODES = {
+    0: ["☀️", "Clear sky"],
+    1: ["🌤️", "Mostly clear"],
+    2: ["⛅", "Partly cloudy"],
+    3: ["☁️", "Overcast"],
+    45: ["🌫️", "Fog"],
+    48: ["🌫️", "Rime fog"],
+    51: ["🌦️", "Light drizzle"],
+    53: ["🌦️", "Drizzle"],
+    55: ["🌧️", "Heavy drizzle"],
+    61: ["🌦️", "Light rain"],
+    63: ["🌧️", "Rain"],
+    65: ["🌧️", "Heavy rain"],
+    71: ["🌨️", "Light snow"],
+    73: ["🌨️", "Snow"],
+    75: ["❄️", "Heavy snow"],
+    80: ["🌦️", "Rain showers"],
+    81: ["🌧️", "Showers"],
+    82: ["⛈️", "Heavy showers"],
+    95: ["⛈️", "Thunderstorm"],
+    96: ["⛈️", "Storm with hail"],
+    99: ["⛈️", "Severe storm"]
+  };
+
+  let weatherRequest = 0;
+  let weatherCache = null;
+
+  function weatherLook(code) {
+    return WEATHER_CODES[Number(code)] || ["🌡️", "Weather"];
+  }
+
+  function aqiLook(value) {
+    if (value <= 50) return ["good", "Good"];
+    if (value <= 100) return ["moderate", "Moderate"];
+    if (value <= 150) return ["poor", "Unhealthy for sensitive groups"];
+    if (value <= 200) return ["bad", "Unhealthy"];
+    if (value <= 300) return ["very-bad", "Very unhealthy"];
+    return ["hazard", "Hazardous"];
+  }
+
+  async function fetchWeatherJson(url) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        signal: controller.signal
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function renderWeather(data) {
+    if (!els.weather) return;
+
+    const [glyph, description] = weatherLook(data.code);
+    els.weatherGlyph.textContent = glyph;
+    els.weatherTemp.textContent = `${data.temp}°C`;
+    els.weatherDesc.textContent = description;
+    els.weather.title = `Current temperature at the map centre: ${data.temp}°C, ${description}`;
+
+    els.weatherAqi.className = "aqi-chip";
+    if (data.aqi == null) {
+      els.weatherAqi.textContent = "AQI —";
+      els.weatherAqi.removeAttribute("title");
+    } else {
+      const [level, label] = aqiLook(data.aqi);
+      els.weatherAqi.textContent = `AQI ${data.aqi}`;
+      els.weatherAqi.classList.add(`is-${level}`);
+      els.weatherAqi.title = `Air quality: ${label} (US AQI)`;
+    }
+
+    els.weather.hidden = false;
+  }
+
+  /**
+   * Shows the weather and air quality at the map centre. Open-Meteo is free and
+   * keyless, and the result is reused for ten minutes per area.
+   */
+  async function updateWeather(lat, lng) {
+    if (!els.weather || !isInServiceArea(lat, lng)) {
+      if (els.weather) els.weather.hidden = true;
+      return;
+    }
+
+    const key = `${lat.toFixed(2)},${lng.toFixed(2)}`;
+    if (weatherCache && weatherCache.key === key && Date.now() - weatherCache.at < WEATHER_TTL) {
+      renderWeather(weatherCache.data);
+      return;
+    }
+
+    const request = (weatherRequest += 1);
+    const coords = `latitude=${lat.toFixed(3)}&longitude=${lng.toFixed(3)}`;
+    try {
+      const [weather, air] = await Promise.all([
+        fetchWeatherJson(
+          `${WEATHER_URL}?${coords}&current=temperature_2m,weather_code&timezone=auto`
+        ),
+        fetchWeatherJson(`${AIR_URL}?${coords}&current=us_aqi&timezone=auto`).catch(() => null)
+      ]);
+      if (request !== weatherRequest) return;
+
+      const current = weather && weather.current ? weather.current : null;
+      const temperature = current ? Number(current.temperature_2m) : NaN;
+      if (!Number.isFinite(temperature)) {
+        els.weather.hidden = true;
+        return;
+      }
+
+      const aqiValue = air && air.current ? Number(air.current.us_aqi) : NaN;
+      const data = {
+        temp: Math.round(temperature),
+        code: current.weather_code,
+        aqi: Number.isFinite(aqiValue) ? Math.round(aqiValue) : null
+      };
+
+      weatherCache = { key, at: Date.now(), data };
+      renderWeather(data);
+    } catch (error) {
+      if (request !== weatherRequest) return;
+      console.warn("Weather unavailable", error);
+      els.weather.hidden = true;
+    }
   }
 
   async function initMap(view) {
@@ -1243,6 +1549,10 @@ out center 300;`;
       zoom: zoomForRadius(view.radius),
       minZoom: 3,
       maxZoom: 19,
+      maxBounds: [
+        [SERVICE_AREA.west - 0.08, SERVICE_AREA.south - 0.08],
+        [SERVICE_AREA.east + 0.08, SERVICE_AREA.north + 0.08]
+      ],
       attributionControl: false
     });
 
@@ -1262,6 +1572,7 @@ out center 300;`;
     state.mapReady = true;
     setBasemap(readBasemap());
     updateMapSource();
+    updateWeather(view.lat, view.lng);
   }
 
   function showMapFallback(error) {
@@ -1628,6 +1939,15 @@ out center 300;`;
         return;
       }
 
+      if (!isInServiceArea(place.lat, place.lng)) {
+        els.searchInput.value = "";
+        state.query = "";
+        applyFilters();
+        setStatus(outsideServiceMessage(), { error: true });
+        showToast(`Not available outside ${SERVICE_AREA.name} yet.`);
+        return;
+      }
+
       els.searchInput.value = "";
       state.query = "";
       await loadTemples({
@@ -1679,6 +1999,16 @@ out center 300;`;
         els.nearMe.textContent = originalLabel;
         const { latitude, longitude } = position.coords;
         showUserMarker(latitude, longitude);
+
+        if (!isInServiceArea(latitude, longitude)) {
+          setStatus(
+            `You are outside ${SERVICE_AREA.name}. ${outsideServiceMessage()}`,
+            { error: true }
+          );
+          showToast(`Mandir Marg covers ${SERVICE_AREA.name} only for now.`);
+          return;
+        }
+
         loadTemples({
           lat: latitude,
           lng: longitude,
