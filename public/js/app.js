@@ -3273,10 +3273,45 @@ out center 300;`;
       location.hostname === "localhost" || location.hostname === "127.0.0.1";
     if (location.protocol !== "https:" && !isLocal) return;
 
+    // A new service worker claims this page after a deployment. Reload once so
+    // the visitor sees the new app shell instead of the previous cached one.
+    const hadController = Boolean(navigator.serviceWorker.controller);
+    let reloading = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || reloading) return;
+      // Never throw away a half-filled form or a map tap in progress.
+      if (isPicking() || document.querySelector("dialog[open]")) {
+        showToast("A new version is ready. It will load the next time you open the map.");
+        return;
+      }
+      reloading = true;
+      window.location.reload();
+    });
+
+    let lastUpdateCheck = 0;
+    const checkForUpdate = () => {
+      const now = Date.now();
+      if (now - lastUpdateCheck < 15 * 60 * 1000) return;
+      lastUpdateCheck = now;
+      navigator.serviceWorker
+        .getRegistration()
+        .then((registration) => registration && registration.update())
+        .catch(() => {});
+    };
+
     window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch((error) => {
-        console.warn("Service worker registration failed", error);
-      });
+      navigator.serviceWorker
+        .register("./sw.js", { updateViaCache: "none" })
+        .then(checkForUpdate)
+        .catch((error) => {
+          console.warn("Service worker registration failed", error);
+        });
+    });
+
+    // Long-lived tabs (a map left open on a phone) pick up a deployment when
+    // the visitor returns to them.
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkForUpdate();
     });
   }
 

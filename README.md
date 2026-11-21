@@ -426,9 +426,10 @@ There is no build step, so there is nothing to compile. Before publishing a chan
 15. Use `python tools/make-icons.py` after editing `public/icons/icon.svg` (needs `pip install pillow`).
 
 Cache busting: bump `VERSION` in `public/sw.js` whenever you change the app shell, so installed
-copies update. The service worker never caches `/api/` or `data/community-temples.json`, which
-keeps live temple data and newly approved community entries fresh; the static cells under
-`data/temples/` are cached and revalidated in the background.
+copies update. A tab that was already open reloads once when the new worker takes control, and
+returning to a long-open tab checks for a deployment again. The service worker never caches `/api/`
+or `data/community-temples.json`, which keeps live temple data and newly approved community entries
+fresh; the static cells under `data/temples/` are cached and revalidated in the background.
 
 ---
 
