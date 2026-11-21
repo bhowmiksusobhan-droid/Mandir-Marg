@@ -12,7 +12,10 @@ framework, no server of your own to maintain. Everything runs on free tiers.
 
 - **Live map** of Hindu temples from OpenStreetMap, clustered and searchable
 - **Street or satellite view** — switch to Esri imagery to spot a temple roof, then tap the map to place its pin exactly
-- **Find temples near me** using the browser's location, or search any town in Tripura
+- **Find temples near me** using the browser's location, search any town in Tripura, or tap any point on the map
+- **Place suggestions while typing** — pick a town or neighbourhood, and the search follows it
+- **Collapsible sidebar** — hide the search column to read the map full-width; the choice is remembered
+- **Turn-by-turn directions** — send a temple to Google Maps from its popup, starting from your location, a typed place or a point on the map
 - **Weather and air quality** at the map centre, from Open-Meteo (no key, no tracking)
 - **Photo contributions** — a geotagged photo places the pin automatically, and EXIF is stripped before publishing
 - **Approval becomes publication** — moderator-approved temples appear on the map from a small community file
@@ -414,9 +417,13 @@ There is no build step, so there is nothing to compile. Before publishing a chan
 6. Click a pin, use **Share**, and open the copied `?temple=` link in a new tab.
 7. Check that the weather chip appears bottom-left on the map and changes after panning.
 8. Search for a place outside Tripura and confirm the beta message appears instead of an empty map.
-9. Preview the publish step: `python tools/publish_temples.py --input rows.json --dry-run`.
-10. Check the browser console for errors.
-11. Use `python tools/make-icons.py` after editing `public/icons/icon.svg` (needs `pip install pillow`).
+9. Type two or more letters of a Tripura town and confirm the suggestions drop down; clear the field.
+10. Press the arrow at the map's left edge to collapse the sidebar, reload, and confirm it stays collapsed.
+11. Press **Pick a point**, tap the map, and confirm the list changes to temples around that pin.
+12. Open a temple, press **Directions**, and confirm the Google Maps button opens a new tab.
+13. Preview the publish step: `python tools/publish_temples.py --input rows.json --dry-run`.
+14. Check the browser console for errors.
+15. Use `python tools/make-icons.py` after editing `public/icons/icon.svg` (needs `pip install pillow`).
 
 Cache busting: bump `VERSION` in `public/sw.js` whenever you change the app shell, so installed
 copies update. The service worker never caches `/api/` or `data/community-temples.json`, which

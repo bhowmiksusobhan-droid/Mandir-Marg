@@ -43,6 +43,13 @@
   const MAP_STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
   const PHOTON_URL = "https://photon.komoot.io/api/";
   const BASEMAP_KEY = "mandirMarg.basemap.v1";
+  const SIDEBAR_KEY = "mandirMarg.sidebar.v1";
+  const ORIGIN_KEY = "mandirMarg.origin.v1";
+
+  // Place-name autocomplete (Photon). Suggestions are debounced and only asked
+  // for while the visitor is actually typing in the field.
+  const SUGGEST_LIMIT = 6;
+  const SUGGEST_DEBOUNCE_MS = 250;
 
   // Open-Meteo needs no API key and allows browser requests.
   const WEATHER_URL = "https://api.open-meteo.com/v1/forecast";
@@ -128,6 +135,9 @@
   const els = {
     searchForm: $("#search-form"),
     searchInput: $("#search-input"),
+    clearSearch: $("#clear-search"),
+    suggestions: $("#search-suggestions"),
+    pickArea: $("#pick-area"),
     nearMe: $("#near-me"),
     radius: $("#radius"),
     status: $("#status"),
@@ -135,7 +145,10 @@
     empty: $("#empty-state"),
     mapHint: $("#map-hint"),
     mapNotice: $("#map-notice"),
+    mapNoticeText: $("#map-notice-text"),
     cancelPick: $("#cancel-pick"),
+    sidebarToggle: $("#sidebar-toggle"),
+    sidebarToggleGlyph: $("#sidebar-toggle-glyph"),
     basemapToggle: $(".basemap-toggle"),
     basemapButtons: document.querySelectorAll("[data-basemap]"),
     weather: $("#weather"),
@@ -145,6 +158,14 @@
     weatherAqi: $("#weather-aqi"),
     toast: $("#toast"),
     installBtn: $("#install-app"),
+
+    directionsDialog: $("#directions-dialog"),
+    directionsDestination: $("#directions-destination"),
+    directionsOriginInput: $("#directions-origin"),
+    directionsSuggestions: $("#directions-suggestions"),
+    directionsError: $("#directions-error"),
+    directionsGo: $("#directions-go"),
+    directionsPick: $("#directions-pick"),
 
     dialog: $("#temple-dialog"),
     form: $("#temple-form"),
@@ -200,10 +221,18 @@
   let popup = null;
   let userMarker = null;
   let placementMarker = null;
+  let areaMarker = null;
   let pickingLocation = false;
+  let pickingArea = false;
+  let pickingOrigin = false;
   let basemapLayers = [];
   let toastTimer = null;
   let hasGlyphs = false;
+
+  let directionsTemple = null;
+  let directionsOrigin = null;
+  let searchSuggestions = null;
+  let directionsSuggestions = null;
 
   let communityPromise = null;
   let photoDataUrl = "";
@@ -693,6 +722,34 @@ out center 300;`;
 
   // Cell files never change during a session, so one fetch per cell is enough.
   const seedCellCache = new Map();
+  let seedIndexPromise = null;
+
+  /**
+   * The dataset's index lists the cells that actually exist. Reading it first
+   * avoids a 404 for every empty cell around the map centre.
+   */
+  function loadSeedIndex() {
+    if (seedIndexPromise) return seedIndexPromise;
+
+    seedIndexPromise = (async () => {
+      try {
+        const response = await fetch(new URL(`${SEED_DIR}index.json`, document.baseURI), {
+          headers: { Accept: "application/json" }
+        });
+        if (!response.ok) return null;
+        const data = await response.json();
+        if (!data || !Array.isArray(data.cells)) return null;
+        const files = data.cells
+          .map((cell) => (cell && typeof cell.file === "string" ? cell.file : ""))
+          .filter(Boolean);
+        return files.length ? new Set(files) : null;
+      } catch {
+        return null;
+      }
+    })();
+
+    return seedIndexPromise;
+  }
 
   function seedCellsFor(lat, lng, radius) {
     const latSpan = radius / 111320;
@@ -744,7 +801,13 @@ out center 300;`;
 
   async function loadSeedElements(lat, lng, radius) {
     const cells = seedCellsFor(lat, lng, radius);
-    const lists = await Promise.all(cells.map(([a, b]) => loadSeedCell(a, b)));
+    const available = await loadSeedIndex();
+    const wanted = available
+      ? cells.filter(([a, b]) => available.has(`${a}_${b}.json`))
+      : cells;
+    // A stale index must never hide the dataset entirely.
+    const finalCells = wanted.length ? wanted : cells;
+    const lists = await Promise.all(finalCells.map(([a, b]) => loadSeedCell(a, b)));
     return lists.flat();
   }
 
@@ -1357,7 +1420,7 @@ out center 300;`;
     const map = state.map;
 
     map.on("click", "clusters", async (event) => {
-      if (pickingLocation) return;
+      if (isPicking()) return;
       const feature = event.features && event.features[0];
       if (!feature) return;
       try {
@@ -1373,7 +1436,7 @@ out center 300;`;
     });
 
     map.on("click", "temple-points", (event) => {
-      if (pickingLocation) return;
+      if (isPicking()) return;
       const feature = event.features && event.features[0];
       if (!feature) return;
       hideMapHint();
@@ -1382,20 +1445,22 @@ out center 300;`;
 
     ["clusters", "temple-points"].forEach((layer) => {
       map.on("mouseenter", layer, () => {
-        map.getCanvas().style.cursor = pickingLocation ? "crosshair" : "pointer";
+        map.getCanvas().style.cursor = isPicking() ? "crosshair" : "pointer";
       });
       map.on("mouseleave", layer, () => {
-        map.getCanvas().style.cursor = pickingLocation ? "crosshair" : "";
+        map.getCanvas().style.cursor = isPicking() ? "crosshair" : "";
       });
     });
 
     map.on("dragstart", () => {
-      if (!pickingLocation) hideMapHint();
+      if (!isPicking()) hideMapHint();
     });
 
     map.on("click", (event) => {
       hideMapHint();
       if (pickingLocation) finishPicking(event.lngLat);
+      else if (pickingArea) finishAreaPicking(event.lngLat);
+      else if (pickingOrigin) finishOriginPicking(event.lngLat);
     });
 
     let weatherTimer = null;
@@ -1724,11 +1789,11 @@ out center 300;`;
     const links = document.createElement("div");
     links.className = "popup-links";
 
-    const directions = document.createElement("a");
-    directions.href = `https://www.google.com/maps/dir/?api=1&destination=${temple.lat},${temple.lng}`;
-    directions.target = "_blank";
-    directions.rel = "noopener noreferrer";
-    directions.textContent = "Directions ↗";
+    const directions = document.createElement("button");
+    directions.type = "button";
+    directions.className = "link-button";
+    directions.textContent = "Directions";
+    directions.addEventListener("click", () => openDirections(temple));
     links.append(directions);
 
     const osm = document.createElement("a");
@@ -1883,6 +1948,216 @@ out center 300;`;
      Search + geolocation
      ========================================================================== */
 
+  function isPicking() {
+    return pickingLocation || pickingArea || pickingOrigin;
+  }
+
+  /** Turns a Photon feature into { lat, lng, name, detail } or null. */
+  function featureToPlace(feature) {
+    if (!feature || !feature.geometry || !Array.isArray(feature.geometry.coordinates)) {
+      return null;
+    }
+    const [lng, lat] = feature.geometry.coordinates;
+    if (typeof lat !== "number" || typeof lng !== "number") return null;
+
+    const properties = feature.properties || {};
+    const name =
+      properties.name || properties.street || properties.city || properties.town ||
+      properties.village || properties.county;
+    if (!name) return null;
+
+    const detailParts = [
+      properties.city || properties.town || properties.village || properties.county,
+      properties.state,
+      properties.country
+    ].filter((part) => part && part !== name);
+    return { lat, lng, name, detail: [...new Set(detailParts)].slice(0, 2).join(", ") };
+  }
+
+  /**
+   * Place suggestions from Photon. `restrict` asks Photon to stay inside the
+   * beta area and double-checks every hit against the same box, so a visitor
+   * can never be sent outside the states we actually cover.
+   */
+  async function fetchSuggestions(term, { restrict = false } = {}) {
+    const build = (useBbox) => {
+      const url = new URL(PHOTON_URL);
+      url.searchParams.set("q", term);
+      url.searchParams.set("limit", String(SUGGEST_LIMIT + 2));
+      url.searchParams.set("lang", "en");
+      if (useBbox) {
+        url.searchParams.set(
+          "bbox",
+          `${SERVICE_AREA.west},${SERVICE_AREA.south},${SERVICE_AREA.east},${SERVICE_AREA.north}`
+        );
+      }
+      return url.href;
+    };
+
+    const load = async (href) => {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      try {
+        const response = await fetch(href, {
+          headers: { Accept: "application/json" },
+          signal: controller.signal
+        });
+        if (!response.ok) throw new Error(`Photon HTTP ${response.status}`);
+        const data = await response.json();
+        return Array.isArray(data.features) ? data.features : [];
+      } finally {
+        clearTimeout(timer);
+      }
+    };
+
+    let features = await load(build(restrict));
+    // A small state bbox can hide valid rural places; fall back to a wider
+    // query and filter locally.
+    if (restrict && !features.length) features = await load(build(false));
+
+    return features
+      .map(featureToPlace)
+      .filter((place) => place && (!restrict || isInServiceArea(place.lat, place.lng)))
+      .slice(0, SUGGEST_LIMIT);
+  }
+
+  /**
+   * Wires a text input to a dropdown of place suggestions. Used for the main
+   * search field and for the directions starting point.
+   */
+  function setupPlaceSuggestions({ input, list, restrict = false, onInput, onSelect }) {
+    let timer = null;
+    let request = 0;
+    let places = [];
+    let active = -1;
+
+    const close = () => {
+      clearTimeout(timer);
+      list.hidden = true;
+      list.textContent = "";
+      input.setAttribute("aria-expanded", "false");
+      input.removeAttribute("aria-activedescendant");
+      places = [];
+      active = -1;
+    };
+
+    const setActive = (index) => {
+      const items = Array.from(list.querySelectorAll("[role='option']"));
+      if (!items.length) return;
+      active = Math.max(0, Math.min(index, items.length - 1));
+      items.forEach((item, i) => {
+        const selected = i === active;
+        item.classList.toggle("is-active", selected);
+        item.setAttribute("aria-selected", selected ? "true" : "false");
+      });
+      input.setAttribute("aria-activedescendant", items[active].id);
+      items[active].scrollIntoView({ block: "nearest" });
+    };
+
+    const choose = (place) => {
+      close();
+      onSelect(place);
+    };
+
+    const render = (results, term) => {
+      list.textContent = "";
+      places = results;
+      active = -1;
+
+      if (!results.length) {
+        const empty = document.createElement("li");
+        empty.className = "suggestion-empty";
+        empty.textContent = restrict
+          ? `No places in ${SERVICE_AREA.name} match “${term}”.`
+          : `No place matches “${term}”.`;
+        list.append(empty);
+      } else {
+        results.forEach((place, index) => {
+          const item = document.createElement("li");
+          item.className = "suggestion";
+          item.id = `${list.id}-option-${index}`;
+          item.setAttribute("role", "option");
+          item.setAttribute("aria-selected", "false");
+
+          const name = document.createElement("span");
+          name.className = "suggestion-name";
+          name.textContent = place.name;
+          item.append(name);
+
+          if (place.detail) {
+            const detail = document.createElement("span");
+            detail.className = "suggestion-detail";
+            detail.textContent = place.detail;
+            item.append(detail);
+          }
+
+          // Keep focus in the input so the click lands and typing can continue.
+          item.addEventListener("mousedown", (event) => event.preventDefault());
+          item.addEventListener("click", () => choose(place));
+          list.append(item);
+        });
+      }
+
+      list.hidden = false;
+      input.setAttribute("aria-expanded", "true");
+    };
+
+    const schedule = (term) => {
+      clearTimeout(timer);
+      if (!term || term.length < 2 || document.activeElement !== input) {
+        close();
+        return;
+      }
+      const current = (request += 1);
+      timer = setTimeout(async () => {
+        try {
+          const results = await fetchSuggestions(term, { restrict });
+          if (current !== request || document.activeElement !== input) return;
+          render(results, term);
+        } catch (error) {
+          if (current !== request) return;
+          console.warn("Place suggestions failed", error);
+          close();
+        }
+      }, SUGGEST_DEBOUNCE_MS);
+    };
+
+    input.addEventListener("input", () => {
+      if (onInput) onInput(input.value);
+      schedule(input.value.trim());
+    });
+
+    input.addEventListener("keydown", (event) => {
+      if (list.hidden) return;
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        setActive(active + 1);
+      } else if (event.key === "ArrowUp") {
+        event.preventDefault();
+        setActive(active - 1);
+      } else if (event.key === "Enter") {
+        const target = places[active >= 0 ? active : 0];
+        if (target) {
+          event.preventDefault();
+          choose(target);
+        } else {
+          close();
+        }
+      } else if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      }
+    });
+
+    input.addEventListener("blur", () => {
+      // A short delay lets a click on an option land before the list closes.
+      setTimeout(close, 150);
+    });
+
+    return { close };
+  }
+
   async function geocodePlace(query) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
@@ -1914,10 +2189,39 @@ out center 300;`;
     }
   }
 
+  function updateClearButton() {
+    if (els.clearSearch) els.clearSearch.hidden = els.searchInput.value.length === 0;
+  }
+
+  /** Jumps to a chosen place (from a suggestion or the search box). */
+  async function selectSearchPlace(place) {
+    if (!isInServiceArea(place.lat, place.lng)) {
+      setStatus(outsideServiceMessage(), { error: true });
+      showToast(`Not available outside ${SERVICE_AREA.name} yet.`);
+      return;
+    }
+
+    els.searchInput.value = place.name;
+    state.query = "";
+    updateClearButton();
+    applyFilters();
+    clearAreaMarker();
+
+    await loadTemples({
+      lat: place.lat,
+      lng: place.lng,
+      label: place.name,
+      radius: Number(els.radius.value)
+    });
+    showToast(`Showing temples around ${place.name}`);
+  }
+
   async function handleSearch(event) {
     event.preventDefault();
+    searchSuggestions.close();
     const raw = els.searchInput.value.trim();
     state.query = raw;
+    updateClearButton();
 
     if (!raw) {
       applyFilters();
@@ -1949,6 +2253,7 @@ out center 300;`;
       if (!isInServiceArea(place.lat, place.lng)) {
         els.searchInput.value = "";
         state.query = "";
+        updateClearButton();
         applyFilters();
         setStatus(outsideServiceMessage(), { error: true });
         showToast(`Not available outside ${SERVICE_AREA.name} yet.`);
@@ -1957,6 +2262,8 @@ out center 300;`;
 
       els.searchInput.value = "";
       state.query = "";
+      updateClearButton();
+      clearAreaMarker();
       await loadTemples({
         lat: place.lat,
         lng: place.lng,
@@ -2006,6 +2313,7 @@ out center 300;`;
         els.nearMe.textContent = originalLabel;
         const { latitude, longitude } = position.coords;
         showUserMarker(latitude, longitude);
+        clearAreaMarker();
 
         if (!isInServiceArea(latitude, longitude)) {
           setStatus(
@@ -2225,6 +2533,42 @@ out center 300;`;
     placementMarker = null;
   }
 
+  function showAreaMarker(lat, lng) {
+    if (!state.map || !window.maplibregl) return;
+    if (!areaMarker) {
+      const element = document.createElement("div");
+      element.className = "area-pin";
+      element.setAttribute("aria-hidden", "true");
+      areaMarker = new window.maplibregl.Marker({ element, anchor: "center" })
+        .setLngLat([lng, lat])
+        .addTo(state.map);
+    } else {
+      areaMarker.setLngLat([lng, lat]);
+    }
+  }
+
+  function clearAreaMarker() {
+    if (!areaMarker) return;
+    areaMarker.remove();
+    areaMarker = null;
+  }
+
+  /** Shared setup for the three "tap the map" modes. */
+  function beginMapPicking(notice) {
+    if (els.mapNoticeText) els.mapNoticeText.textContent = notice;
+    els.mapNotice.hidden = false;
+    els.mapHint.classList.add("is-hidden");
+    state.map.getCanvas().style.cursor = "crosshair";
+  }
+
+  function endMapPicking() {
+    pickingLocation = false;
+    pickingArea = false;
+    pickingOrigin = false;
+    els.mapNotice.hidden = true;
+    if (state.map) state.map.getCanvas().style.cursor = "";
+  }
+
   function startPicking() {
     if (!state.map || !state.mapReady) {
       showToast("The map is still loading. Please try again in a moment.");
@@ -2232,11 +2576,11 @@ out center 300;`;
     }
 
     pickingLocation = true;
+    pickingArea = false;
+    pickingOrigin = false;
     els.dialog.close();
     setBasemap("satellite");
-    els.mapNotice.hidden = false;
-    els.mapHint.classList.add("is-hidden");
-    state.map.getCanvas().style.cursor = "crosshair";
+    beginMapPicking("Tap the temple on the satellite map to place its pin.");
 
     // Jump to the starting point at rooftop scale so the temple is recognisable.
     const lat = Number.parseFloat(els.lat.value);
@@ -2265,11 +2609,186 @@ out center 300;`;
     showToast("Location set. Add the temple's name and save.");
   }
 
-  function cancelPicking() {
+  function startAreaPicking() {
+    if (!state.map || !state.mapReady) {
+      showToast("The map is still loading. Please try again in a moment.");
+      return;
+    }
+    if (pickingLocation) els.dialog.close();
+
     pickingLocation = false;
+    pickingArea = true;
+    pickingOrigin = false;
+    const km = Math.round(Number(els.radius.value) / 1000);
+    beginMapPicking(`Tap anywhere on the map to see temples within ${km} km of that point.`);
+    showToast("Tap a point on the map.");
+  }
+
+  function finishAreaPicking(lngLat) {
+    pickingArea = false;
     els.mapNotice.hidden = true;
     if (state.map) state.map.getCanvas().style.cursor = "";
+
+    if (!isInServiceArea(lngLat.lat, lngLat.lng)) {
+      setStatus(outsideServiceMessage(), { error: true });
+      showToast(`Please choose a point inside ${SERVICE_AREA.name}.`);
+      return;
+    }
+
+    showAreaMarker(lngLat.lat, lngLat.lng);
+    loadTemples({
+      lat: lngLat.lat,
+      lng: lngLat.lng,
+      label: "the selected point",
+      radius: Number(els.radius.value),
+      moveMap: false
+    });
+    showToast("Showing temples around the selected point.");
+  }
+
+  function startOriginPicking() {
+    if (!state.map || !state.mapReady) {
+      showToast("The map is still loading. Please try again in a moment.");
+      return;
+    }
+    if (!directionsTemple) return;
+
+    els.directionsDialog.close();
+    pickingLocation = false;
+    pickingArea = false;
+    pickingOrigin = true;
+    beginMapPicking("Tap the map where your journey starts.");
+  }
+
+  function finishOriginPicking(lngLat) {
+    pickingOrigin = false;
+    els.mapNotice.hidden = true;
+    if (state.map) state.map.getCanvas().style.cursor = "";
+
+    directionsOrigin = {
+      lat: lngLat.lat,
+      lng: lngLat.lng,
+      name: `Point on map (${lngLat.lat.toFixed(3)}, ${lngLat.lng.toFixed(3)})`
+    };
+    els.directionsOriginInput.value = directionsOrigin.name;
+    els.directionsError.hidden = true;
+    els.directionsDialog.showModal();
+    els.directionsOriginInput.focus();
+  }
+
+  function cancelPicking() {
+    if (pickingOrigin) {
+      endMapPicking();
+      els.directionsDialog.showModal();
+      return;
+    }
+    if (pickingArea) {
+      endMapPicking();
+      return;
+    }
+    // Temple pin placement returns to the contribution form.
+    endMapPicking();
     els.dialog.showModal();
+  }
+
+  /* ==========================================================================
+     Directions
+     ========================================================================== */
+
+  function readSavedOrigin() {
+    try {
+      const raw = sessionStorage.getItem(ORIGIN_KEY);
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      if (typeof saved.lat !== "number" || typeof saved.lng !== "number") return null;
+      return { lat: saved.lat, lng: saved.lng, name: String(saved.name || "Starting point") };
+    } catch {
+      return null;
+    }
+  }
+
+  function saveOrigin(origin) {
+    try {
+      if (origin) sessionStorage.setItem(ORIGIN_KEY, JSON.stringify(origin));
+      else sessionStorage.removeItem(ORIGIN_KEY);
+    } catch {
+      /* Session storage can be disabled; the dialog still works. */
+    }
+  }
+
+  function openDirections(temple) {
+    if (!temple) return;
+    directionsTemple = temple;
+    directionsOrigin = readSavedOrigin();
+    els.directionsDestination.textContent = temple.name;
+    els.directionsOriginInput.value = directionsOrigin ? directionsOrigin.name : "";
+    els.directionsError.hidden = true;
+    if (directionsSuggestions) directionsSuggestions.close();
+    els.directionsDialog.showModal();
+  }
+
+  function closeDirections() {
+    if (directionsSuggestions) directionsSuggestions.close();
+    els.directionsDialog.close();
+  }
+
+  /**
+   * Opens Google Maps directions. With no starting point Google Maps uses the
+   * visitor's current location, which is the common case.
+   */
+  async function goDirections() {
+    if (!directionsTemple) return;
+
+    const typed = els.directionsOriginInput.value.trim();
+    let origin = null;
+    els.directionsError.hidden = true;
+
+    if (typed) {
+      if (directionsOrigin && directionsOrigin.name === typed) {
+        origin = directionsOrigin;
+      } else {
+        els.directionsGo.disabled = true;
+        els.directionsGo.textContent = "Looking up…";
+        try {
+          const place = await geocodePlace(typed);
+          if (!place) {
+            els.directionsError.textContent = `We couldn't find “${typed}”. Try another town, or pick a point on the map.`;
+            els.directionsError.hidden = false;
+            return;
+          }
+          origin = { lat: place.lat, lng: place.lng, name: typed };
+        } catch (error) {
+          console.error("Directions origin lookup failed", error);
+          els.directionsError.textContent =
+            "Could not look up that place. Check your connection and try again.";
+          els.directionsError.hidden = false;
+          return;
+        } finally {
+          els.directionsGo.disabled = false;
+          els.directionsGo.textContent = "Open in Google Maps";
+        }
+      }
+    }
+
+    directionsOrigin = origin;
+    saveOrigin(origin);
+
+    const url = new URL("https://www.google.com/maps/dir/");
+    url.searchParams.set("api", "1");
+    url.searchParams.set("destination", `${directionsTemple.lat},${directionsTemple.lng}`);
+    if (origin) url.searchParams.set("origin", `${origin.lat},${origin.lng}`);
+    url.searchParams.set("travelmode", "driving");
+
+    closeDirections();
+
+    // An anchor click opens a new tab without tripping popup blockers; it also
+    // keeps this page's state (map, search results) intact.
+    const link = document.createElement("a");
+    link.href = url.href;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.click();
+    showToast("Opening directions in Google Maps.");
   }
 
   /**
@@ -2292,9 +2811,7 @@ out center 300;`;
     if (els.duplicateWarning) els.duplicateWarning.hidden = true;
 
     // If the visitor reopens the form while placing a pin, leave pick mode.
-    pickingLocation = false;
-    if (els.mapNotice) els.mapNotice.hidden = true;
-    if (state.map) state.map.getCanvas().style.cursor = "";
+    endMapPicking();
     clearPlacementMarker();
 
     els.kind.value = mode;
@@ -2764,15 +3281,68 @@ out center 300;`;
   }
 
   /* ==========================================================================
+     Collapsible sidebar
+     ========================================================================== */
+
+  function setSidebarCollapsed(collapsed, { persist = true } = {}) {
+    document.body.classList.toggle("sidebar-collapsed", collapsed);
+
+    if (els.sidebarToggle) {
+      els.sidebarToggle.setAttribute("aria-expanded", collapsed ? "false" : "true");
+      els.sidebarToggle.setAttribute(
+        "aria-label",
+        collapsed ? "Show search and results" : "Hide search and results"
+      );
+      els.sidebarToggle.title = collapsed ? "Show search and results" : "Hide search and results";
+    }
+    if (els.sidebarToggleGlyph) els.sidebarToggleGlyph.textContent = collapsed ? "›" : "‹";
+
+    if (persist) {
+      try {
+        localStorage.setItem(SIDEBAR_KEY, collapsed ? "1" : "0");
+      } catch {
+        /* Private browsing can reject storage; the toggle still works. */
+      }
+    }
+
+    // The map container changed size, so MapLibre must remeasure it.
+    if (state.map) requestAnimationFrame(() => state.map.resize());
+  }
+
+  function readSidebarCollapsed() {
+    try {
+      return localStorage.getItem(SIDEBAR_KEY) === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  /* ==========================================================================
      Init
      ========================================================================== */
 
   function bindEvents() {
     els.searchForm.addEventListener("submit", handleSearch);
 
-    els.searchInput.addEventListener("input", () => {
-      state.query = els.searchInput.value;
+    searchSuggestions = setupPlaceSuggestions({
+      input: els.searchInput,
+      list: els.suggestions,
+      restrict: true,
+      onInput: (value) => {
+        state.query = value;
+        updateClearButton();
+        applyFilters();
+      },
+      onSelect: (place) => selectSearchPlace(place)
+    });
+
+    els.clearSearch.addEventListener("click", () => {
+      els.searchInput.value = "";
+      state.query = "";
+      updateClearButton();
+      searchSuggestions.close();
       applyFilters();
+      els.searchInput.focus();
     });
 
     els.radius.addEventListener("change", () => {
@@ -2786,6 +3356,11 @@ out center 300;`;
     });
 
     els.nearMe.addEventListener("click", handleNearMe);
+    els.pickArea.addEventListener("click", startAreaPicking);
+
+    els.sidebarToggle.addEventListener("click", () => {
+      setSidebarCollapsed(!document.body.classList.contains("sidebar-collapsed"));
+    });
 
     els.basemapButtons.forEach((button) => {
       button.addEventListener("click", () => setBasemap(button.dataset.basemap));
@@ -2800,8 +3375,28 @@ out center 300;`;
     els.confirmDuplicate.addEventListener("click", confirmDuplicate);
     els.dismissDuplicate.addEventListener("click", hideDuplicateWarning);
 
+    // Directions dialog: starting point can be typed or picked on the map.
+    document.querySelectorAll("[data-close-directions]").forEach((button) => {
+      button.addEventListener("click", closeDirections);
+    });
+    els.directionsGo.addEventListener("click", goDirections);
+    els.directionsPick.addEventListener("click", startOriginPicking);
+    els.directionsDialog.addEventListener("close", () => {
+      if (directionsSuggestions) directionsSuggestions.close();
+    });
+    directionsSuggestions = setupPlaceSuggestions({
+      input: els.directionsOriginInput,
+      list: els.directionsSuggestions,
+      restrict: false,
+      onSelect: (place) => {
+        directionsOrigin = place;
+        els.directionsOriginInput.value = place.name;
+        els.directionsError.hidden = true;
+      }
+    });
+
     document.addEventListener("keydown", (event) => {
-      if (event.key === "Escape" && pickingLocation) {
+      if (event.key === "Escape" && isPicking()) {
         event.preventDefault();
         cancelPicking();
       }
@@ -2823,6 +3418,8 @@ out center 300;`;
     registerServiceWorker();
     renderContributions();
     bindEvents();
+    setSidebarCollapsed(readSidebarCollapsed(), { persist: false });
+    updateClearButton();
 
     const view = readView();
     els.radius.value = String(view.radius);

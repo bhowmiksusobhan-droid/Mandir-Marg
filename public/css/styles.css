@@ -179,12 +179,17 @@ textarea {
   vertical-align: middle;
 }
 
-/* Development scope notice, shown under the header. */
-.beta-notice {
-  margin: 0;
-  padding: 7px clamp(16px, 3vw, 32px);
-  border-bottom: 1px solid var(--line);
+/* Development scope notice, pinned to the bottom of the page. */
+.site-footer {
+  flex: none;
+  border-top: 1px solid var(--line);
   background: #fff6e2;
+}
+
+.beta-notice {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 7px clamp(16px, 3vw, 32px);
   color: #6a5433;
   font-size: 0.8rem;
   line-height: 1.4;
@@ -332,22 +337,124 @@ textarea {
   border-bottom: 1px solid var(--line);
 }
 
+.search-box {
+  position: relative;
+  z-index: 30;
+}
+
 .search-row {
   display: flex;
   gap: 8px;
 }
 
-.search-row input {
+.search-field {
+  position: relative;
+  display: flex;
   flex: 1;
   min-width: 0;
+}
+
+.search-row input {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
   min-height: 44px;
-  padding: 10px 13px;
+  padding: 10px 40px 10px 13px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
   font-size: 1rem;
   box-shadow: inset 0 1px 2px rgba(60, 25, 5, 0.04);
+}
+
+/* The app draws its own clear button, so hide the browser's. */
+input[type="search"]::-webkit-search-cancel-button,
+input[type="search"]::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: 5px;
+  display: grid;
+  place-items: center;
+  width: 31px;
+  height: 31px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #8a7458;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  transform: translateY(-50%);
+}
+
+.search-clear:hover {
+  background: #f3e8d5;
+  color: var(--maroon);
+}
+
+.search-clear[hidden] {
+  display: none;
+}
+
+/* ---------- Place suggestions ---------- */
+
+.suggestions {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: 320px;
+  margin: 0;
+  padding: 5px;
+  overflow-y: auto;
+  list-style: none;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+}
+
+.suggestions[hidden] {
+  display: none;
+}
+
+.suggestion {
+  padding: 8px 10px;
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+.suggestion:hover,
+.suggestion.is-active {
+  background: #f7edd9;
+}
+
+.suggestion-name {
+  display: block;
+  color: var(--ink);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.suggestion-detail {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted);
+  font-size: 0.74rem;
+}
+
+.suggestion-empty {
+  padding: 9px 10px;
+  color: var(--muted);
+  font-size: 0.8rem;
 }
 
 .search-row input::placeholder {
@@ -512,6 +619,48 @@ textarea {
   display: none;
 }
 
+/* ---------- Collapsible sidebar ---------- */
+
+.sidebar-toggle {
+  position: absolute;
+  z-index: 8;
+  top: 50%;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: 23px;
+  height: 60px;
+  padding: 0;
+  border: 1px solid rgba(216, 197, 162, 0.9);
+  border-left: 0;
+  border-radius: 0 9px 9px 0;
+  background: rgba(255, 252, 245, 0.95);
+  color: #6a5433;
+  font-size: 1.05rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transform: translateY(-50%);
+  backdrop-filter: blur(4px);
+}
+
+.sidebar-toggle:hover {
+  background: #fff7e7;
+  color: var(--maroon);
+}
+
+body.sidebar-collapsed .app-shell {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-areas: "map";
+}
+
+body.sidebar-collapsed .search-panel,
+body.sidebar-collapsed .list-panel {
+  display: none;
+}
+
 /* ---------- Weather + air quality (map overlay) ---------- */
 
 .weather-widget {
@@ -646,6 +795,17 @@ textarea {
   background: var(--gold);
   box-shadow:
     0 0 0 5px rgba(217, 164, 65, 0.32),
+    0 2px 6px rgba(40, 15, 0, 0.35);
+}
+
+.area-pin {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: var(--maroon);
+  box-shadow:
+    0 0 0 5px rgba(107, 29, 29, 0.22),
     0 2px 6px rgba(40, 15, 0, 0.35);
 }
 
@@ -1147,6 +1307,47 @@ dialog:modal {
   font-size: 0.88rem;
 }
 
+/* Directions: the suggestion list flows inline so the scrolling dialog never
+   clips it. */
+.directions-form .search-box input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 13px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.directions-form .search-box input:focus {
+  border-color: var(--gold);
+}
+
+.directions-form .suggestions {
+  position: static;
+  margin-top: 6px;
+  box-shadow: var(--shadow-sm);
+}
+
+.directions-form .hint {
+  margin: 3px 0 0;
+}
+
+.directions-form .hint .link-button {
+  display: inline;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--maroon);
+  font: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
 .field {
   display: grid;
   gap: 5px;
@@ -1416,6 +1617,13 @@ dialog:modal {
     border-bottom: 1px solid var(--line);
   }
 
+  /* With the sidebar hidden the map should take the whole screen. */
+  body.sidebar-collapsed .map-panel {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 55dvh;
+  }
+
   .list-panel {
     order: 2;
     overflow: visible;
@@ -1451,7 +1659,7 @@ dialog:modal {
   .beta-notice {
     padding: 6px 14px;
     font-size: 0.72rem;
-    text-align: left;
+    text-align: center;
   }
 
   .weather-widget {
@@ -1477,7 +1685,9 @@ dialog:modal {
   }
 
   .controls .btn {
-    flex: 1 1 100%;
+    flex: 1 1 0;
+    padding-inline: 8px;
+    font-size: 0.8rem;
   }
 
   .radius-label {
